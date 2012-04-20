@@ -1,0 +1,16 @@
+#!/bin/tcsh -f
+
+###  Prepare the Envoronment
+setenv DISPLAY tricorder.inetz.com:0.0
+
+###  Start the Window Manager
+fvwm2 -f ~/.tricorder_fvwmrc &
+
+###  Wait 2 seconds to allow the WM to set up completely
+sleep 2;
+
+###  Run the Setup script that starts up the other windows
+source ~/.tricorder_xinitrc
+
+
+

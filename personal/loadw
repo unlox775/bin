@@ -1,0 +1,3 @@
+#!/bin/sh
+
+xload -geometry 250x50-0-0 -fg yellow &

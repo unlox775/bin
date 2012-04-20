@@ -1,0 +1,49 @@
+#!/usr/bin/perl
+
+
+select((select(STDOUT), $| = 1)[0]);
+select((select(STDERR), $| = 1)[0]);
+
+use Odyc::Bug qw(:common);
+
+$ENV{HTTP_HOST} = "freeservers.com";
+
+use Benchmark qw(cmpthese);
+
+
+###  Utility
+use Getopt::Long;
+
+
+#########################
+###  Get Command-line options
+
+###  Initial GetOpt config
+Getopt::Long::config("no_ignore_case");
+our $opt_startup = '';
+our $opt_s = '';
+my $success = GetOptions(qw(s=s startup=s));
+
+if(! $success) {
+  _usage("Bad options");
+  exit 0;
+}
+
+$opt_startup ||= $opt_s;
+
+my $c = shift @ARGV;
+bug "Count $c";
+
+my $str;
+eval $opt_startup;
+die $@ if $@;
+#bug $str;
+
+my %x;
+foreach ( 0..$#ARGV ) {
+  bug $ARGV[$_];
+  $x{"CODE".($_+1)} = eval( "sub { ".$ARGV[$_]." }");
+  die $@ if $@;
+}
+
+cmpthese( $c, \%x )

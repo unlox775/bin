@@ -1,0 +1,135 @@
+#!/usr/bin/perl
+
+#########################
+###  column_tab
+#########################
+#
+# Version : $Id: flip_columns,v 1.2 2007/12/06 16:12:52 dave Exp $
+#
+#########################
+
+#########################
+###  Main Runtime
+#########################
+
+###  Read in the Comma (and optionally double quoted) data
+my @data;
+while ( <> ) {
+  chomp;
+  push @data, [ 
+                split_delim_line( 
+                                  ',',
+                                  $_,
+                                  '"'
+                                  )
+                ];
+} 
+
+
+###  Exit if we don't need to do anything
+exit unless @data || @{ $data[0] };
+
+
+###  Print out the data BABY!
+my $i = 0;
+while ( 1 ) {
+  my $a_row_had_more_values = 0;
+  my @values;
+  foreach my $row ( @data ) {
+    if ( ( ! $a_row_had_more_values ) && ( $#{$row} > $i ) ) {
+      $a_row_had_more_values = 1;
+    }
+    push @values, ( $row->[ $i ] || '');
+  }
+  map { s/\t/ /g } @values;
+  map { s/\r//g } @values;
+  print comma_delim(@values)."\n";
+  last if ! $a_row_had_more_values;
+  $i++;
+}
+
+
+###  We're done
+exit 0;
+
+
+
+
+
+
+
+
+#########################
+#########################
+###  Utility Subroutines
+#########################
+#########################
+
+###  split_delim_line - Used to split apart a line that is delimited and optionally quoted
+sub split_delim_line {
+
+  ###  Get the parameters
+  my ( $delim_value, $line, $delim_quote_value ) = @_;
+
+
+  ###  Create the container we'll store the field values in
+  my @field_values = ();
+
+
+  ###  Set up the $delim_value and $delim_quote_value
+  ###    NOTE: the below system does not work for delimiters
+  ###      that are more than 1 characters in length
+  $delim_value = quotemeta( $delim_value );
+  $delim_quote_value = quotemeta( $delim_quote_value );
+
+
+  ######  Split apart the delimeted fields
+  ###  SPLIT DELIMITED-AND-QUOTED LINES
+  if ( $delim_quote_value ) {
+    ###  The Quoted Delimeted method
+    push(@field_values, $+) while $line =~ m{
+      $delim_quote_value([^$delim_quote_value\\]*(?:\\.[^$delim_quote_value\\]*)*)$delim_quote_value$delim_value?  ###  Groups the phrase inside the quotes
+        | ([^$delim_value]+)$delim_value?
+          | $delim_value
+          }gx;
+    push(@field_values, undef) if substr($line, -1, 1) eq $delim_value;
+  }
+
+  ###  SPLIT DELIMITED-AND-UNQUOTED LINES
+  else { 
+    @field_values = split(/$delim_value/, $line); 
+  }
+
+
+  ###  Return the values
+  return @field_values;
+}
+
+sub comma_delim {
+
+  ###  Return the formatted value
+  ( 
+    '"' . 
+    join( 
+          '","',
+          ( 
+            map {
+              if ( defined $_ ) { 
+                s/[\"]/\\$&/g;
+                $_;
+              } else { '' }
+            } @_
+            )
+          ) .
+    '"'
+    
+    );
+}
+
+
+
+
+
+
+
+

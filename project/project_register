@@ -1,0 +1,103 @@
+#!/usr/bin/perl -w
+
+#########################
+###  project_register
+#
+# Version : $Id: project_register,v 1.3 2011/05/23 15:11:47 dave Exp $
+#
+#########################
+
+###  Pragmas
+use strict;
+
+#########################
+###  Configuration, Setup
+
+###  Globals
+my $SYSTEM_PROJECT_BASE = $ENV{SYSTEM_PROJECT_BASE} || '/sandbox/projects';
+if ( $ENV{SYSTEM_CVS_BASE_REGEXP} ) {
+    ( $ENV{SYSTEM_CVS_BASE} ) = ( `tcsh -f -c pwd` =~ /^($ENV{SYSTEM_CVS_BASE_REGEXP})/ );
+}
+(my $SYSTEM_CVS_BASE = $ENV{SYSTEM_CVS_BASE} || "$ENV{HOME}/dev" ) =~ s@/+$@@;
+
+###  Get the Project file
+my $curr_project;
+if ( $ARGV[0]
+     && $ARGV[0] =~ /^[\.\w]+$/
+     && -d "$SYSTEM_PROJECT_BASE/$ARGV[0]"
+     ) {
+    $curr_project = shift @ARGV;
+} elsif ( -e "$SYSTEM_CVS_BASE/../.current_project" ) {
+    ($curr_project = `cat $SYSTEM_CVS_BASE/../.current_project`) =~ s/^\s+|\s+$//g;
+    if ( $curr_project !~ /^[\.\w]+$/
+         || ! -d "$SYSTEM_PROJECT_BASE/$curr_project/"
+         ) {
+        die "Invalid project in .current_project, please choose a new one : [$SYSTEM_PROJECT_BASE/$curr_project] [". (-d "$SYSTEM_PROJECT_BASE/$curr_project/") ."]\n"
+    }
+}
+else { 
+    die "You must first choose a project with project_choose, or specify one as the first argument\n"
+}
+
+###  Check out the project
+if ( !    -r "$SYSTEM_PROJECT_BASE/$curr_project"
+     || ! -w "$SYSTEM_PROJECT_BASE/$curr_project"
+     || ! -x "$SYSTEM_PROJECT_BASE/$curr_project"
+     || ! -f "$SYSTEM_PROJECT_BASE/$curr_project/affected_files.txt"
+     ) {
+    die "The project directory is malformed\n";
+}
+if ( ! -w "$SYSTEM_PROJECT_BASE/$curr_project/affected_files.txt" ) {
+    die "You do not have write access to the project's affected_files.txt file: $SYSTEM_PROJECT_BASE/$curr_project/affected_files.txt\n";
+}
+
+my $aff_file = "$SYSTEM_PROJECT_BASE/$curr_project/affected_files.txt";
+
+
+#########################
+###  Main Runtime
+
+###  Get the Current Working directory
+(my $pwd = `tcsh -f -c pwd`) =~ s/[\n\r]//g;
+
+my @files;
+foreach ( @ARGV ) {
+    ###  Set the full path unless it's absolute
+    ($_ = "$pwd/$_") =~ s@/\.?(?=/)@@g unless m@^/@s;
+
+    ###  Unless the file exists, then print an error and skip
+    if ( ! -e ) {
+        warn "file '$_' doesn't exist, skipping...\n";
+        next;
+    }
+
+    ###  Skip silently if the file is in a CVS/ directory
+    next if m@/CVS/@;
+
+    ###  Skip silently if the file is a directory
+    next if -d;
+
+    ###  Skip silently if the file is a backup file of some sort (the name contains pound (#) signs)
+    next if /\#/;
+
+    ###  Try to strip off the CVSROOT from the beginning
+    s@^$SYSTEM_CVS_BASE/@@g;
+
+    ###  Print it out to the user
+    push @files, $_;
+}
+
+
+###  Write it out to the affected file
+foreach my $file ( sort @files ) {
+    my $qm_file = quotemeta( $file );
+    if ( `grep -E '^${qm_file}[^[:graph:]]*(\\\#|\$)' "$aff_file"` ) {
+        warn "Already registered: $file\n";
+    }
+    else {
+        `echo "$file" >> "$aff_file"`;
+        warn "Added: $file\n";
+    }
+}
+
+exit 0;

@@ -1,0 +1,10 @@
+#!/bin/tcsh -f
+
+xterm 	-cr darkblue \
+	-sl 5000 \
+	-fg yellow \
+	-geometry 400x200+500+100 \
+	-e loadlog_graph.pl "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9" "$10" &
+
+#	-display laforge.Inetz.COM:0.0 \
+

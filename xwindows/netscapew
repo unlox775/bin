@@ -1,0 +1,4 @@
+#!/bin/sh
+
+/usr/local/netscape/netscape -iconic 'http://core.inetz.com/'$USER'launch.html' &
+

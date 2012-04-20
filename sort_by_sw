@@ -1,0 +1,4 @@
+#!/usr/bin/perl -w
+
+my @a = <>;
+print sort { (split(/\s*/,$a,1))[1] cmp (split(/\s*/,$b,1))[1] } @a;

@@ -1,0 +1,7 @@
+#!/bin/sh
+
+setenv ASDF 1
+
+xterm -sl 2000 -cr green -hc blue \#-156+36 -geometry 80x40-93+36 &
+#rxvt +sb -tn rxvt -fn 6x13 -geometry 80x40-93+36&
+

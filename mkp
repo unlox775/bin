@@ -1,0 +1,137 @@
+#!/usr/bin/perl -w
+
+use strict;
+use Term::Complete;
+
+
+
+######  Configuration
+###  The projects directory
+my $projects_directory = "$ENV{HOME}/work/projects";
+
+###  Default symlinks
+my %default_symlinks = ( 
+                         'links/p1' => "$ENV{HOME}/dev/op/admin",
+                         'links/p2' => "$ENV{HOME}/dev/modules/Dev/OpSystem/admin",
+                         'links/p3' => "$ENV{HOME}/dev/resellers/root.reseller/rsc/templates",
+                         'links/p4' => "$ENV{HOME}/dev/resellers/root.reseller/rsc/templates/admin",
+#                         'links/p5' => "$ENV{HOME}/free/",
+#                         'links/p6' => "$ENV{HOME}/free/",
+#                         'links/p7' => "$ENV{HOME}/free/",
+#                         'links/p8' => "$ENV{HOME}/free/",
+#                         'links/p9' => "$ENV{HOME}/free/",
+                         );
+
+
+######  Determine the name of the new project directory
+###  Define the var
+my $new_project;
+
+###  Syntax 1 for BUGS :
+###    BUG_9999_whatever_the_name
+###    9999 Whatever the name
+if ( join(' ', @ARGV) =~ /^[\s_]*(?:BUG[\s_]+)?(\d{3,})[\s_]+/si ) {
+
+  ###  If it matched then grab the Bug number
+  my $bug_number = $1;
+
+  ###  Get the rest of the name and reformat it
+  ( my $bug_name = lc( $' ) ) =~ s/[^\w\-]/_/g;
+
+  ###  Get rid of leading and trailing '_'s
+  $bug_name =~ s/^_+|_+$//gs;
+
+  ###  Error out if that bug number is already taken
+  die "That Bug number already has a project area..." if grep( 
+                                                               m@/BUG_$bug_number\D@si,
+                                                               <$projects_directory/*>
+                                                               );
+
+  ###  Set the $new_project name
+  $new_project = "BUG_$bug_number\_$bug_name";
+}
+
+
+###  Syntax 2 for Projects :
+###    2001-05-21_whatever_the_name
+###    5/21/2001 Whatever The Name
+###    5/21 Whatever The Name
+###    Whatever The Name
+if ( 
+     ( ! $new_project ) &&
+     ( 
+       join(' ', @ARGV) =~ /^[\s_]*(?:  
+                                    (?: 
+                                     (\d{4})-(\d{1,2})-(\d{1,2}) |
+                                     (\d{1,2})\/(\d{1,2})\/(\d{4}) |
+                                     (\d{1,2})\/(\d{1,2})
+                                     )
+                                    [\s_]+
+                                    )?/six 
+       )
+     ) {
+  
+  ###  Assemble the date from one of the matched formats above
+  ###    or from the current date if they're all empty
+  my ($y, $m, $d) = ( 
+                      ###  2001-05-21 Format
+                      ( defined $1 )
+                      ? ( $1, $2, $3 )
+
+                      ###  5/21/2001 Format
+                      : ( defined $4 )
+                      ? ( $6, $4, $5 )
+                      
+                      ###  5/21 Format (use current year)
+                      : ( defined $7 )
+                      ? ( (( localtime )[5] + 1900), $7, $8 )
+                      
+                      ###  Use the current_date
+                      : ( (( localtime )[5] + 1900), (( localtime )[4] + 1), ( localtime )[3] )
+                      );
+
+  ###  Fix the date parameters
+  my $project_date = sprintf("%.4d", $y) . '-' . sprintf("%.2d", $m) . '-' . sprintf("%.2d", $d);
+  
+
+  ###  Get the rest of the name and reformat it
+  ( my $project_name = lc( $' ) ) =~ s/[^\w\-]/_/g;
+
+  ###  Get rid of leading and trailing '_'s
+  $project_name =~ s/^_+|_+$//gs;
+
+  ###  Set the $new_project name
+  $new_project = "$project_date\_$project_name";
+}
+
+
+###  Error out if the $new_project is still not defined
+die "Error compiling the new project name from your inputs..." unless $new_project;
+
+###  Error out if the $new_project already exists
+die "New Project already created..." if -e "$projects_directory/$new_project";
+
+
+###  Create the project directory and it's /links dir
+mkdir "$projects_directory/$new_project", 0777;
+mkdir "$projects_directory/$new_project/links", 0777;
+
+
+
+###  Setup %default_symlinks
+foreach ( keys %default_symlinks ) { 
+
+  ###  Symlink or DIE!!!
+  symlink( $default_symlinks{ $_ }, "$projects_directory/$new_project/$_" ) || die "Symlinking of default $projects_directory/$new_project/$_ to $default_symlinks{ $_ } failed : $!";
+}
+
+
+###  Finally Run the EDITOR command to create their summary.txt
+exec( 
+      ( $ENV{EDITOR} || 'emacs -nw' ), 
+      "$projects_directory/$new_project/summary.txt"
+      );
+
+
+
+

@@ -1,0 +1,11 @@
+#!/usr/bin/perl
+select((select(STDOUT), $| = 1)[0]);
+
+my $time = 30;
+if ($ARGV[0] =~ /^-(\d+)$/) { $time = $1;    shift @ARGV; }
+
+print " " x 5 . join('',@ARGV) . " " x 4;
+
+my $duh = `/bin/sleep $time`;
+
+exit 0;

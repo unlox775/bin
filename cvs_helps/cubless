@@ -1,0 +1,8 @@
+#!/bin/tcsh -f
+
+touch ~/.cvs_skip_files
+
+cub $* | & fgrep -v -f ~/.cvs_skip_files -x > ~/.last_culess
+exec last_culess
+ 
+ 

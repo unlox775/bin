@@ -1,0 +1,154 @@
+#!/usr/bin/perl -w
+
+###  If this is in pipe mode, then read STDIN
+if ( $ARGV[0] eq '-' ) {
+
+  ###  Drop the '-'
+  shift @ARGV;
+
+  ###  Now go through STDIN until it's gone, 
+  ###    printing and storing it in @ARGV
+  while ( <STDIN> ) {
+    ###  Echo out the input
+    print;
+
+    ###  Drop the newline
+    chop;
+
+    ###  Add it to @ARGV
+    push @ARGV, $_;
+  }
+
+
+  ###  Print some space and a NOTE: 
+  print "\n\n\nIndividual File Revision Details:\n";
+
+}
+
+
+###  Get rid of any ***  comment *** stuff in the 
+###    @ARGV as well as leading and trailing spaces
+###    and blank parameters
+@ARGV = map {
+
+  ###  Take out any *** comment *** stuff
+  s/\*+.+\*+//g;
+
+  ###  Strip leading and trailing spaces
+  s/^\s+|\s+$//sg;
+  
+  ###  Drop blank parameters
+  ( ! /^\s*$/s )
+    ? $_
+      : ();
+
+} @ARGV;
+
+
+###  Call the command and setup the Filehandle to read the output
+###    Get rid of and hide STDERR output
+open CVSLOG, 'cvs log "' . join('" "', @ARGV) . '" 2>&1 |';
+
+###  Go through the output
+my ( $last_revision_line, $output_prefix, $delay_buffer ) = ('','','');
+while ( <CVSLOG> ) { 
+
+  $l ||= 0;  
+  $a ||= 0;  
+  $l++; 
+  $a++ if /^---/;  
+
+  ###  Save the 'revision' lines for output with the date lines
+  ($last_revision_line = $_) =~ s/\s+$//s if /^revision/;
+
+  $_ = "" if ( (! /^\={60}/ ) && ($a == 0) && ($l > 2)) || ( /^revision/ );  
+
+  ###  Reformat the date line
+  ###  Example: date: 2000/11/07 22:58:03;  author: earl;  state: Exp;  lines: +79 -43
+  if ( /^date: 20\d\d\// ) {
+    ###  Make another copy of $_
+    my $line = $_;
+
+    ###  Get the pieces
+    my %pieces = map { ( /^\s*([^:]+?)\s*:\s*(.+?)\s*$/s ) } split( /\s*;\s*/, $line );
+
+    ###  Re-arrange the date
+    $pieces{date} =~ s/(\d+):(\d\d):(\d\d)/( 
+                                             "@ " .
+                                             
+                                             ###  Truncate the hour to english
+                                             ( 
+                                               ( ( ( $1 - 7 ) % 24 ) > 12)
+                                               ? ( ( $1 - 7 ) % 24 ) - 12
+                                               : ( 
+                                                   ( ( ( $1 - 7 ) % 24 ) == 0 )
+                                                   ? 12
+                                                   : ( ( $1 - 7 ) % 24 ) + 0
+                                                   )
+                                               ) .
+                                               
+
+                                             ###  put am or pm
+                                             ( 
+                                               ( ( ( $1 - 7 ) % 24 ) < 12 )
+                                               ? 'am'
+                                               : 'pm'
+                                               )
+                                             
+                                             )/exg;
+
+    ###  Set the output prefix to '***  ' if the committer is not $ENV{USER}
+    ###    otherwise empty it.
+    if ( 
+         ($a) && 
+         ( $ENV{USER} ) && 
+         ( $pieces{author} ne $ENV{USER} ) 
+         ) { $output_prefix = '***  '; }
+    else { $output_prefix = ''; }
+
+    ###  Redefine $_
+    $_ = "$last_revision_line --> Committed on $pieces{date} by $pieces{author}\n";
+  }
+
+  s@^RCS file: /cvsroot/sys/free/|,v(?=\s)@@g;
+
+  ###  Restart if we hit an ending for a file
+  if ( /^\={60}/ ) {
+    ###  Empty the Output Prefix
+    $output_prefix = '';
+    
+    ###  Empty the $delay_buffer even if there is stuff in there
+    $delay_buffer = '';
+
+    ###  Reset the counters
+    $l = $a = 0;
+
+    ###  Add some newlines to the ==== line
+    $_ .= "\n\n";
+  }
+
+
+  ###  Add the output prefix unless this is the last ========== line
+  $_ = $output_prefix . $_ if ( /\n/s ) && ( ! /^={60}/ );
+
+
+  ###  Now, if it doesn't have a '***  ' at the 
+  ###    beginning, then print it and whatever is 
+  ###    in the delay buffer.
+  if ( 
+       ( /\n/s ) &&
+       ( ! /^\*\*\*  /s )
+       ) {
+    print $delay_buffer . $_;
+
+    ###  Empty the $delay_buffer
+    $delay_buffer = '';
+  }
+
+  ###  Otherwise, just add to the delay buffer
+  else {
+    $delay_buffer .= $_;
+
+  }
+}
+

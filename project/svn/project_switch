@@ -1,0 +1,125 @@
+#!/usr/bin/perl -w
+
+#########################
+###  project_switch
+#
+# Version : $Id: project_switch,v 1.1 2011/05/23 15:57:29 dave Exp $
+#
+#########################
+
+###  Pragmas
+use strict;
+
+#########################
+###  Configuration, Setup
+
+use Term::Complete;
+
+###  Globals
+my $SYSTEM_PROJECT_BASE = $ENV{SYSTEM_PROJECT_BASE} || '/sandbox/projects';
+if ( $ENV{SYSTEM_SVN_BASE_REGEXP} ) {
+    ( $ENV{SYSTEM_SVN_BASE} ) = ( `tcsh -f -c pwd` =~ /^($ENV{SYSTEM_SVN_BASE_REGEXP})/ );
+}
+(my $SYSTEM_SVN_BASE = $ENV{SYSTEM_SVN_BASE} || "$ENV{HOME}/dev" ) =~ s@/+$@@;
+
+###  Get the Project file
+my $curr_project;
+if ( $ARGV[0]
+     && $ARGV[0] ne 'archive'
+     && $ARGV[0] ne 'logs'
+     && $ARGV[0] =~ /^[\.\w]+$/
+     && -d "$SYSTEM_PROJECT_BASE/$ARGV[0]"
+    ) {
+    $curr_project = shift @ARGV;
+    }
+elsif ( ! $ARGV[0] ) {
+    &choose_project;
+}
+elsif ( $ARGV[0] eq 'archive'
+        || $ARGV[0] eq 'logs'
+        || -d "$SYSTEM_PROJECT_BASE/archive/$ARGV[0]"
+      ) {
+    die "That project has already been archived\n";
+}
+elsif ( ! -d "$SYSTEM_PROJECT_BASE/$ARGV[0]" ) {
+    die "Project does not exist\n";
+}
+else {
+    exec('project_list');
+}
+
+###  Check out the project
+if ( ! -w "$SYSTEM_PROJECT_BASE/$curr_project" ) {
+    die "Can't switch to project: permission denied\n";
+}
+
+
+#########################
+###  Main Runtime
+
+`echo -n $curr_project > $SYSTEM_SVN_BASE/../.current_project`;
+warn "Switched to project : $curr_project\n";
+
+###  Run a personal create command
+if ( $ENV{PROJECT_POST_SWITCH_CMD} ) {
+    print `$ENV{PROJECT_POST_SWITCH_CMD} $curr_project`;
+}
+
+exit 0;
+
+
+#########################
+###  Command-line choosing of a project
+
+sub choose_project {
+
+    ###  Get the list of projects
+    my @projects = grep {$_ ne 'archive' && $_ ne 'logs'} sort map { 
+        s/^.*\///g;
+        
+        $_;
+    } <$SYSTEM_PROJECT_BASE/*>;
+    
+    print "\nProjects to Switch to:\n\n";
+    print "\t" . join( "\n\t",
+                       map { ($_ + 1) . ".\t" . $projects[$_]; }
+#                        grep { 
+#                            ###  Don't Filter out any if we're being called by 
+#                            ###    an 'all' version of this command
+#                            ( $0 =~ /all$/s ) ||
+# 
+#                                ###  Filter out completed projects
+#                                ( 
+#                                  ( ! -e "$SYSTEM_PROJECT_BASE/$projects[$_]/complete_summary.txt" ) &&
+#                                  ( ! -e "$SYSTEM_PROJECT_BASE/$projects[$_]/completed_summary.txt" ) &&
+#                                  ( ! -e "$SYSTEM_PROJECT_BASE/$projects[$_]/finish_summary.txt" ) &&
+#                                  ( ! -e "$SYSTEM_PROJECT_BASE/$projects[$_]/finished_summary.txt" ) &&
+#                                  ( ! -e "$SYSTEM_PROJECT_BASE/$projects[$_]/cancel_summary.txt" ) &&
+#                                  ( ! -e "$SYSTEM_PROJECT_BASE/$projects[$_]/cancelled_summary.txt" )
+#                                )
+#                            }
+        ( 0 .. $#projects )
+       ) . "\n\n";
+    
+    ###  Get their selection
+    $curr_project = Complete( 
+        "Which project do you want to switch to: ", 
+        [ 
+          @projects,
+          ( 1 .. scalar @projects ),
+        ]
+        );
+
+    ###  If they chose a number
+    if ( $curr_project =~ /^\d+$/
+         && $projects[$curr_project - 1]
+       ) {
+        $curr_project = $projects[$curr_project - 1];
+    }
+    ###  Otherwise a bad name!
+    elsif ( ! grep {$_ eq $curr_project} @projects ) {
+        warn "Missing or bad project name.\n";
+
+        exec('project_list');
+    }
+}

@@ -1,0 +1,5 @@
+#!/bin/sh
+
+xterm -cr green -hc blue &
+#rxvt +sb -tn rxvt -fn 6x13 -iconic -geometry 127x37+394+459 -name db &
+

@@ -1,0 +1,85 @@
+#!/usr/bin/perl -w
+
+#########################
+###  makep_sym
+#
+# Version : $Id: switchp_sym,v 1.2 2008/06/10 19:02:58 dave Exp $
+#
+#########################
+
+###  Pragmas
+use strict;
+
+#########################
+###  Configuration, Setup
+
+use Term::Complete;
+use Dave::Bug qw(:common);
+
+###  Globals
+my $SYSTEM_PROJECT_BASE = '/var/projects';
+###  The projects directory
+my $projects_directory = "$ENV{HOME}/work/projects";
+
+
+###  Get the list of projects
+my @projects = map { 
+  s/^.*\///g;
+  
+  $_;
+} <$projects_directory/*>;
+my %projects = map { (my $t = $_) =~ s/^[\-\d_]+//g;
+                     ($t, $_, $_, $_)
+                 } @projects;
+
+###  Use the first Argument by default
+my $which = $ARGV[0];
+
+###  Exit unless valid
+if ( ! $projects{$which} ) {
+  exit 100;
+}
+
+$which = $projects{$which};
+
+
+######  If they are already on this project, then do nothing
+###  Get what we're currently linked to
+my $last_link = readlink("$projects_directory/_current_") || "$projects_directory/$which";
+
+###  If it is not different, then don't switch
+if ( 
+     ( ! readlink("$projects_directory/_current_") ) ||
+     ( $last_link eq "$projects_directory/$which" )
+     ) {
+  print "\nAlready on that project...\n";
+  
+  exit 0;
+}
+
+
+
+###  Do the switch
+print "\nSwitching project to $which...\n";
+
+
+###  Remove the files in the way
+unlink "$projects_directory/_last_", "$projects_directory/_current_";
+
+###  Now run the symlinking and check for success
+( 
+  symlink("$projects_directory/$which", "$projects_directory/_current_") &&
+  symlink($last_link, "$projects_directory/_last_")
+  ) || die "Symlinking failed";
+
+
+######  Now write the .switch_tos and .switch_froms files
+###  Append the .switch_froms file in the _last_ directory
+open SWITCH_FROM, ">>$projects_directory/_last_/.switch_froms" or die "Could not open .switch_froms file '$projects_directory/_last_/.switch_froms' for appending : $!";
+print SWITCH_FROM time() . "\n";
+close SWITCH_FROM;
+
+###  Append the .switch_tos file in the _current_ directory
+open SWITCH_TO, ">>$projects_directory/_current_/.switch_tos" or die "Could not open .switch_tos file '$projects_directory/_current_/.switch_tos' for appending : $!";
+print SWITCH_TO time() . "\n";
+close SWITCH_TO;

@@ -1,0 +1,3 @@
+#!/bin/sh
+
+xclock -digital -update 1 -geometry 150x30-0+0 &

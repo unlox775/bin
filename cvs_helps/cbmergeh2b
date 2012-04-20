@@ -1,0 +1,7 @@
+#!/bin/bash -norc
+
+cvs update -Ad $1
+cu -j `cat ~/.branch` $1
+mv $1 $1\_tmp
+cub $1
+mv -i $1\_tmp $1 

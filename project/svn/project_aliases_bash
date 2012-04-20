@@ -1,0 +1,59 @@
+#!/bin/bash
+
+#########################
+###  INSTALLATION
+#  
+#  To Install:
+#  -----------
+#  
+#  1) Copy everything below this section into an rc file for bash
+#     (.bashrc, .login or .profile)
+#  
+#  2) Read through the config sections below and tweak for your
+#     preferences (e.g. emacs vs. vim preferences, etc.)
+#  
+#  3) Get trained by someone on how to use the new Project System
+#  
+#########################
+
+#########################
+###  Project System Setup
+
+export     SYSTEM_TMP_BASE="/sandbox/$USER/myproject_tmp"
+export SYSTEM_PROJECT_BASE=/sandbox/projects
+###  SVN Repo Settings
+#export SYSTEM_SVN_BASE_REGEXP="$HOME/public_html/.sites/.sandbox/\w+/myproject"
+export SYSTEM_SVN_BASE="$HOME/sandbox/dave/myproject"
+export      P_BIN_PATH=$SYSTEM_CVS_BASE/admin/bin
+
+###  Paths to SVN
+# export PATH="$SYSTEM_BIN_PATH:$PATH"
+
+######  Modify PATH to include the project bin dirs
+###  The project system files
+export PATH="$P_BIN_PATH:$PATH"
+
+###  SVN helps: uncomment this if you want them
+###    NOTE: these don't currently have docs, but 
+###    as they are REALLY simple, try just looking
+###    at the source.  Or go ask Dave.
+# export PATH="$P_BIN_PATH/svn_helps:$PATH"
+
+
+#########################
+###  Project Aliases
+alias    preg=project_register
+alias pcreate=project_create
+alias pswitch=project_switch
+alias   plist=project_list
+alias    paff=project_affected_files
+alias    psum=project_summary
+
+# ###  Edit files (emacs preference)
+# export EDITOR=emacs
+
+###  ###  Operate on affected files
+###  alias          aff_stat='cd $SYSTEM_SVN_BASE; export CUR_PROJECT_DIR=$SYSTEM_PROJECT_BASE/`cat ~/.current_project`; svn status           `cat $CUR_PROJECT_DIR/affected_files.txt`'
+###  alias          aff_diff='cd $SYSTEM_SVN_BASE; export CUR_PROJECT_DIR=$SYSTEM_PROJECT_BASE/`cat ~/.current_project`; svn diff             `cat $CUR_PROJECT_DIR/affected_files.txt`'
+###  alias           aff_log='cd $SYSTEM_SVN_BASE; export CUR_PROJECT_DIR=$SYSTEM_PROJECT_BASE/`cat ~/.current_project`; svn log --limit 500  `cat $CUR_PROJECT_DIR/affected_files.txt`'
+

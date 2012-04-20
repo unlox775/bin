@@ -1,0 +1,10 @@
+#!/usr/bin/perl
+
+foreach ( 1 .. ( $ARGV[0] || 1 ) ) {
+  system("stty raw -echo");
+  my $c = getc(STDIN);
+  system("stty -raw echo");
+  my $cstr = $c;
+  $cstr = '<ESC>' if ord( $c ) == 27;
+  print sprintf("%.2lx", ord( $c ) )." - '$cstr'\n";
+}

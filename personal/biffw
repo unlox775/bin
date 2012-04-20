@@ -1,0 +1,5 @@
+#!/bin/sh
+
+hbiff -t 3 &
+#hbiff -sn -F -H -t 0 -g =-0+36 -summaryGeometry +300+200 -fn -adobe-helvetica-bold-o-normal--34-240-100-100-p-182-iso8859-1 -bg black -fg white -tally
+

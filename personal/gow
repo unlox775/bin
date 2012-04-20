@@ -1,0 +1,5 @@
+#!/bin/sh
+
+xterm +sb -cr green -hc blue -iconic \#-212+1 -geometry 155x35+40+491 -T go -n go -e screen -d -RR go &
+#rxvt +sb -tn rxvt -fn 6x13 -iconic -geometry 155x35+40+491 -name go &
+

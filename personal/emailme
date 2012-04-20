@@ -1,0 +1,46 @@
+#!/usr/bin/perl 
+
+###############################################
+###################  Main  ####################
+###############################################
+
+my ($options, @emails);
+
+###  Get the Options String
+if ($ARGV[0] =~ /^-\w+$/) { $options = shift @ARGV; }
+
+my $message = join(" ",@ARGV);
+
+###  Add emails to the Notify List
+if ($options =~ /p/i) { push(@emails, '8015575568@dpcs.mobile.att.net'); }
+
+if ( ($options =~ /e/i) || ( (!@emails) && ($options !~ /w/i) ) ) { push(@emails, 'dave@odyc.com'); }
+
+
+###  Notify by Email
+if (@emails) 
+{
+	open(MAILH, "|/usr/sbin/sendmail -t \"" . join(' ',@emails) . "\" ") or die "Conection to Sendmail Failed";
+       
+	print MAILH <<"ETX";
+From: Dave Buchanan <dave\@aboutws.com>
+Subject: $message
+
+$message
+ETX
+
+	close MAILH;
+}
+
+###  Do a Popup Error if -w
+if ($options =~ /w/i) { `~/bin/personal/tricorder_errpopup $message`; }
+
+exit 0;
+
+
+###############################################
+#################  End Main  ##################
+###############################################
+
+
+

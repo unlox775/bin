@@ -1,0 +1,7 @@
+#!/bin/tcsh -f
+
+touch ~/.svn_skip_files
+touch ~/.svn_skip_files_re
+
+ss $* | & fgrep -v -f ~/.svn_skip_files -x | egrep -v -f ~/.svn_skip_files_re -x > ~/.last_ssless
+exec last_ssless

@@ -1,0 +1,4 @@
+#!/bin/tcsh -f
+
+/usr/local/pilot/bin/pilot-xfer --exclude ~/old_backup/palm_pilot/unlox/exclude_backup.txt -s ~/old_backup/palm_pilot/unlox/backup
+

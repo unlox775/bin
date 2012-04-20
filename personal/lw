@@ -1,0 +1,31 @@
+#!/bin/tcsh -f
+
+setenv DISPLAY $USER.odyc.com:0.0
+
+set h = 35;
+if ($1) set h = `expr \( 56 \* \( $1 - 1 \) \) + 35`;
+
+set label = $HOST;
+if ("$label" =~ sapphire*) set label = "Database Server";
+if ("$label" =~ amber*) set label = "File Server";
+if ("$label" =~ jade*) set label = "Web Server";
+if ("$label" =~ topaz*) set label = "Mail Server";
+if ("$label" =~ onyx*) set label = "DNS Server";
+
+
+xload 	-scale 2 \
+	-hl blue \
+	-label "$label" \
+	-xrm "*Desk:0" \
+	-geometry 150x50+0-$h \
+	-fg yellow &
+
+xload   -scale 2 \
+        -hl blue \
+        -label "Day Span" \
+        -update 864 \
+	-xrm "*Desk:0" \
+        -geometry 100x50+153-$h \
+        -fg yellow &
+
+

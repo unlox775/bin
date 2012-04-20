@@ -1,0 +1,6 @@
+#!/bin/tcsh -f
+
+ps -x | grep netscape | grep -v grep
+echo `ps -x | grep netscape | grep -v grep | cut -c 1-5`
+kill -9 `ps -x | grep netscape | grep -v grep | cut -c 1-5`
+

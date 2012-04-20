@@ -1,0 +1,5 @@
+#!/bin/bash -norc
+
+svn update -r$1 $2 ;
+mv -i $2 $2\_\~$1\~;
+suh $2;  mv -i $2\_\~$1\~ $2; 

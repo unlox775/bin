@@ -1,0 +1,6 @@
+#!/bin/tcsh -f
+
+set removefiles = "$*"
+cb $removefiles 
+crm $removefiles 
+ 

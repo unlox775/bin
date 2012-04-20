@@ -1,0 +1,4 @@
+#!/usr/bin/perl
+
+my @a = <>;
+print sort { (split(/\s*/,$a,2))[1] <=> (split(/\s*/,$b,2))[1] } @a;

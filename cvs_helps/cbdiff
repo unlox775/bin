@@ -1,0 +1,3 @@
+#!/bin/bash -norc
+
+cdiff -r`cat ~/.branch` -rHEAD $* 

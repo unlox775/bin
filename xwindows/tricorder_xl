@@ -1,0 +1,11 @@
+#!/bin/tcsh -f
+
+( \
+	( \
+		sleep 120; \
+		/usr/local/bin/xmms -u \
+	) &; \
+	/usr/X11R6/bin/xlock -nice 20 -nolock -mode random -erasemode no_fade -modelist 'ifs galaxy gears superquadrics mandelbrot kumppa thornbird atlantis flow' -duration 600 ; \
+	/usr/local/bin/xmms -p \
+) &
+

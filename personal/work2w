@@ -1,0 +1,5 @@
+#!/bin/sh
+
+xterm +sb -cr green -hc blue -iconic \#-193+20 -geometry 150x50+139+206 -T work2 -n work2 -e screen -d -RR work2 &
+#rxvt +sb -tn rxvt -fn 6x13 -iconic -geometry 150x50+139+206 -name work2 &
+

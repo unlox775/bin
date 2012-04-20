@@ -1,0 +1,50 @@
+#!/usr/bin/perl
+
+select((select(STDOUT), $| = 1)[0]);
+
+my $sleep_delay = 5;
+my $width = 150;
+my $max = 4;
+my $char = "#";
+
+
+###  Allow them to change the defaults
+
+foreach ( grep(/^-*(t(ime)?|d(elay)?)=?[\.\d]+/,@ARGV) ) { ($sleep_delay = $_) =~ s/\D//g; }
+foreach ( grep(/^-*w(idth)?=?[\.\d]+/,@ARGV) ) { ($width = $_) =~ s/\D//g; }
+foreach ( grep(/^-*m(ax)?=?[\.\d]+/,@ARGV) ) { $max = &parse_num($_); }
+foreach ( grep(/^-*c(har)?=?.+/,@ARGV) ) { $char = chop($_); }
+
+
+###  Loop
+while (1)
+{
+	###  Get the load
+	my ($uptime, $theload) = (`/usr/bin/uptime`);
+	if ( $uptime =~ /averages?:\s*([\d\.]+)/i ) { $theload =  &parse_num($1); }
+
+	###  Create the load bar
+	my $bar = $char x (1 + sprintf("%.0f",( $width * &real_remainder(($theload / $max),1) )));
+
+	###  Put in the load metering lines
+	foreach (1..($max-1)) { substr($bar,( sprintf("%.0f",( $width * &real_remainder(($_ / $max),1) )) ),1) = " " if length($bar) > sprintf("%.0f",( $width * &real_remainder(($_ / $max),1) )); }
+
+#	$bar .= " $theload";
+
+	###  Print out the bar
+	print $bar . "\n";
+	
+	###  Wait the delay
+	`sleep $sleep_delay`;
+}
+
+
+
+sub
+pad { (my $replace = $_[0]+(10**$_[1])) =~ s/^1//g;    $replace; }
+
+sub
+parse_num { my $str = shift;    return 0 unless defined $str;    $str =~ s/[^\d\.]//g;    $str =~ s/^(\d*)((?:\.\d+)?)(\..*)?$/$1$2/;    $str =~ s/^0*//;    $str =~ s/0*$// if $str =~ /\./;    $str = 0 unless $str;    $str; }
+
+sub
+real_remainder { my ($num, $r) = @_;    return 0 unless $r;    $num - int($num / $r); }

@@ -1,0 +1,5 @@
+#!/bin/sh
+
+xterm +sb -cr green -hc blue -iconic \#-222+20 -geometry 115x46+430+347 -T read -n read -e screen -d -RR read &
+#rxvt +sb -tn rxvt -fn 6x13 -iconic -geometry 115x46+430+347 -name read &
+

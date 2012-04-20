@@ -1,0 +1,6 @@
+#!/bin/tcsh -f
+
+while (1)
+	lwp-request 'http://www.time.gov/timezone.cgi?Mountain/d/-7' | egrep '>.*[0-9]+:[0-9][0-9]:[0-9][0-9].*<' | perl -e '$_ = <>;    s/\s+|<.*?>//g;    print "$_\n";'
+	sleep 1
+end

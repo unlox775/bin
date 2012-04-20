@@ -1,0 +1,52 @@
+#!/usr/bin/perl -w
+
+#########################
+###  project_create
+#
+# Version : $Id: project_create,v 1.3 2011/05/23 15:11:46 dave Exp $
+#
+#########################
+
+###  Pragmas
+use strict;
+
+#########################
+###  Configuration, Setup
+
+###  Globals
+my $SYSTEM_PROJECT_BASE = $ENV{SYSTEM_PROJECT_BASE} || '/sandbox/projects';
+
+
+#########################
+###  Main Runtime
+
+my $project_name = join(' ',@ARGV);
+my $orig = $project_name;
+( $project_name = lc($project_name) ) =~ s/[^\w\.]/_/g;
+$project_name =~ s/__+/_/g;
+$project_name =~ s/^_|_$//g;
+
+if ( $project_name ne $orig ) {
+    warn "WARNING: Project name was scrubbed.\n\nThe name used is: $project_name\n\n";
+}
+
+if ( -d "$SYSTEM_PROJECT_BASE/$project_name" ) {
+    die "A project by that name already exists: $SYSTEM_PROJECT_BASE/$project_name\n";
+}
+if ( -e "$SYSTEM_PROJECT_BASE/archive/$project_name" ) {
+    die "That project name was used by an archived project: $SYSTEM_PROJECT_BASE/archive/$project_name\n";
+}
+
+###  Make the project
+`mkdir $SYSTEM_PROJECT_BASE/$project_name`;
+`touch $SYSTEM_PROJECT_BASE/$project_name/affected_files.txt`;
+warn "Project Created: $project_name\n";
+
+###  Run a personal create command
+if ( $ENV{PROJECT_POST_CREATE_CMD} ) {
+    print `$ENV{PROJECT_POST_CREATE_CMD} $project_name`;
+}
+
+exec("project_switch $project_name");
+
+exit 0;

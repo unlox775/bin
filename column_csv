@@ -1,0 +1,52 @@
+#!/usr/bin/perl
+
+#########################
+###  column_tab
+#########################
+#
+# Version : $Id: column_csv,v 1.2 2007/12/06 16:12:52 dave Exp $
+#
+#########################
+
+#########################
+###  Main Runtime
+#########################
+
+###  Read in the Tab-delimted data
+my @data;
+while ( <> ) {
+  chomp;
+  my @row = split("\t");
+  print &comma_delim(@row)."\n";
+} 
+
+###  We're done
+exit 0;
+
+
+#########################
+###  Utility Subroutines
+#########################
+
+sub comma_delim {
+
+  ###  Return the formatted value
+  ( 
+    '"' . 
+    join( 
+          '","',
+          ( 
+            map {
+              if ( defined $_ ) { 
+                s/[\n]/\\n/g;
+                s/[\r]/\\r/g;
+                s/[\"]/\\$&/g;
+                $_;
+              } else { '' }
+            } @_
+            )
+          ) .
+    '"'
+    
+    );
+}

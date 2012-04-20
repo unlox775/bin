@@ -1,0 +1,63 @@
+#!/usr/bin/perl -w
+
+
+#########################
+###  project_register
+#
+# Version : $Id: project_files_list,v 1.1 2011/05/23 15:57:29 dave Exp $
+#
+#########################
+
+###  Pragmas
+use strict;
+
+#########################
+###  Configuration, Setup
+
+###  Globals
+my $SYSTEM_PROJECT_BASE = $ENV{SYSTEM_PROJECT_BASE} || '/sandbox/projects';
+if ( $ENV{SYSTEM_SVN_BASE_REGEXP} ) {
+    ( $ENV{SYSTEM_SVN_BASE} ) = ( `tcsh -f -c pwd` =~ /^($ENV{SYSTEM_SVN_BASE_REGEXP})/ );
+}
+(my $SYSTEM_SVN_BASE = $ENV{SYSTEM_SVN_BASE} || "$ENV{HOME}/dev" ) =~ s@/+$@@;
+
+###  Get the Project file
+my $curr_project;
+if ( $ARGV[0]
+     && $ARGV[0] =~ /^[\.\w]+$/
+     && -d "$SYSTEM_PROJECT_BASE/$ARGV[0]"
+     ) {
+    $curr_project = shift @ARGV;
+} elsif ( -e "$SYSTEM_SVN_BASE/../.current_project" ) {
+    ($curr_project = `cat $SYSTEM_SVN_BASE/../.current_project`) =~ s/^\s+|\s+$//g;
+    if ( $curr_project !~ /^[\.\w]+$/
+         || ! -d "$SYSTEM_PROJECT_BASE/$curr_project"
+         ) {
+        die "Invalid project in .current_project, please choose a new one : [$curr_project]\n"
+    }
+}
+else {
+    die "You must first choose a project with project_choose, or specify one as the first argument\n"
+}
+
+###  Check out the project
+if ( !    -r "$SYSTEM_PROJECT_BASE/$curr_project"
+     || ! -x "$SYSTEM_PROJECT_BASE/$curr_project"
+     || ! -f "$SYSTEM_PROJECT_BASE/$curr_project/affected_files.txt"
+     ) {
+    die "The project directory is malformed\n";
+}
+
+my $aff_file = "$SYSTEM_PROJECT_BASE/$curr_project/affected_files.txt";
+
+
+#########################
+###  Main Runtime
+
+foreach my $file ( split("\n",`cat $SYSTEM_PROJECT_BASE/$curr_project/affected_files.txt`) ) {
+    $file =~ s/(\s*\#.*$|\s+)$//g;
+    next if ! length $file;
+    next if -d "$SYSTEM_SVN_BASE/$file";
+
+    print "$file\n";
+}

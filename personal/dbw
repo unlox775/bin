@@ -1,0 +1,5 @@
+#!/bin/sh
+
+xterm +sb -cr green -hc blue -iconic \#-241+20 -geometry 127x37+394+459 -T db -n db -e screen -d -RR db &
+#rxvt +sb -tn rxvt -fn 6x13 -iconic -geometry 127x37+394+459 -name db &
+

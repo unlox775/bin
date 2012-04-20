@@ -1,0 +1,75 @@
+#!/usr/bin/perl -w
+
+use strict;
+
+###  Utility
+use DBI;
+
+
+#########################
+###  Main Runtime
+
+######  Get the Query String
+###  From the First Argument passed us
+my $qstr = join(' ', @ARGV );
+
+###  Or from STDIN if nothing
+if ( ! $qstr ) {
+  $qstr = '';
+  while (<>) { $qstr .= $_ }
+}
+
+
+######  Connect to the Database and Run The Query
+###  Connect
+#my $dbh = DBI->connect( "DBI:mysql:tele;host=localhost",  'tele','tele' ) or die "Connect Failed : $DBI::errstr";
+my $dbh = DBI->connect( "DBI:mysql:tele;host=cmsdb",      'dbuchanan','tele' ) or die "Connect Failed : $DBI::errstr";
+
+###  Set the date format
+# $dbh->do("alter session set NLS_DATE_FORMAT = 'YYYY-MM-DD HH24:MI:SS'");
+
+###  Create and Execute the Statement Handle
+my $sth = $dbh->prepare( $qstr );
+$sth->execute() or die "Executing Query Failed : $DBI::errstr";
+
+
+######  Output the Data
+###  Print the field names first
+print comma_delim( @{ $sth->{NAME} } ) . "\n";
+
+###  Print the rest of the data as we get it
+while ( my @row = $sth->fetchrow_array ) {
+  print comma_delim( @{ @row } ) . "\n";
+}
+
+
+
+#########################
+###  Utility Subroutines
+
+###  A simple subroutines to join values comma-delimeted and 
+###    escape characters
+sub comma_delim {
+
+  ###  Return the formatted value
+  ( 
+    '"' . 
+    join( 
+          '","',
+          ( 
+            map {
+              if ( defined $_ ) { 
+                s/[\"]/\\$&/g;
+                $_;
+              } else { '' }
+            } @_
+            )
+          ) .
+    '"'
+    
+    );
+}
+
+
+
+

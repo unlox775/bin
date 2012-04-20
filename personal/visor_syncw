@@ -1,0 +1,5 @@
+#!/bin/sh
+
+xterm -sl 2000 -cr green -hc blue \#-156+56 -geometry 80x40 -e visor_sync &
+#rxvt +sb -tn rxvt -fn 6x13 -geometry 80x40-93+36 -e pine &
+

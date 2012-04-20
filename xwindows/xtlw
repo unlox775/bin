@@ -1,0 +1,7 @@
+#!/bin/tcsh -f
+
+xterm 	-cr darkblue \
+	-fg yellow \
+	-display laforge.Inetz.COM:0.0 \
+	-geometry 400x200+1230+100 \
+	-e xtermload --width=400 --max=30 &

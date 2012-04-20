@@ -1,0 +1,33 @@
+#!/usr/bin/perl -w
+
+###  Get the Current Working directory
+(my $pwd = `pwd`) =~ s/[\n\r]//g;
+
+foreach ( @ARGV ) {
+  ###  Set the full path unless it's absolute
+  ($_ = "$pwd/$_") =~ s@/\.?(?=/)@@g unless m@^/@s;
+
+  ###  Unless the file exists, then print an error and skip
+  if ( ! -e ) {
+    warn "file '$_' doesn't exist, skipping...\n";
+    next;
+  }
+
+  ###  Skip silently if the file is in a CVS/ directory
+  next if m@/CVS/@;
+
+  ###  Skip silently if the file is a directory
+  next if -d;
+
+  ###  Skip silently if the file is a backup file of some sort (the name contains pound (#) signs)
+  next if /\#/;
+
+  ###  Try to strip off the CVSROOT from the beginning
+  s@^$ENV{HOME}/dev/@@g;
+
+  ###  Print it out to the user
+  print $_ . "\n";
+}
+
+print "\n";
+

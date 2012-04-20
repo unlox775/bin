@@ -1,0 +1,36 @@
+#!/usr/bin/perl 
+
+###############################################
+###################  Main  ####################
+###############################################
+
+my @picts;
+
+#my $logged_in = `/usr/bin/w | /usr/bin/grep -v grep | /usr/bin/egrep '^$ENV{USER}' | /usr/bin/egrep '(:0|tricorder)'`;
+#if ( $logged_in ) 
+#{
+	unshift @picts, <$ENV{HOME}/.bg/*.jpg>;
+
+	###  Family Pictures
+	foreach (1 .. 50) { unshift @picts, <$ENV{HOME}/.bg/fam/*.jpg>; }
+
+	###  Cool Pictures
+	foreach (1 .. 10) { unshift @picts, <$ENV{HOME}/.bg/cool/*.jpg>; }
+
+	die "There were no pictures found in the directory" unless @picts;
+
+	my $pict = $picts[ int( rand( scalar @picts ) ) ];
+
+#	system("/usr/X11R6/bin/xv -quit -max -display 0:0 -root $pict &");
+	system("/usr/X11R6/bin/xv -quit -max -root $pict &");
+#}
+#else { print STDERR "$ENV{USER} is not logged in on console currently.\n"; }
+
+exit 0;
+
+
+###############################################
+#################  End Main  ##################
+###############################################
+
+

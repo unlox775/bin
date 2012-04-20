@@ -1,0 +1,12 @@
+#!/bin/tcsh -f
+
+unsetenv SLWSTART
+if ($?1) then
+	if ($1 != '') then
+		setenv SLWSTART $1
+	endif
+endif
+
+xterm -sl 2000 -cr green -hc blue \#+0+0 -geometry 100x30+15+60 -name loadsw &
+#rxvt +sb -tn rxvt -fn 6x13 -iconic -geometry 150x50+15+60 -name loadsw &
+

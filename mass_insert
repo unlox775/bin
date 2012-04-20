@@ -1,0 +1,196 @@
+#!/usr/bin/perl -w
+
+#########################
+###  util/mass_insert
+###  Version : $Id: mass_insert,v 1.4 2009/01/26 17:54:07 dave Exp $
+###
+###  Quick util for popululating tables from CSV files
+#########################
+
+use strict;
+use Dave::Bug qw(:common);
+
+#########################
+###  Initialization / Libraries
+
+###  Utility
+use DBI;
+#use Odyc::Global qw( @ODYC_DSN );
+use Getopt::Long;
+use Dave::Util qw( &split_delim_line );
+
+###  Declare vars
+use vars qw( @fields
+             @DSN
+             );
+my $autocommit = 0;
+
+
+#########################
+###  Get Command-line options
+
+###  Initial GetOpt config
+Getopt::Long::config("no_ignore_case");
+our $opt_odyc = 0;
+our $opt_force = 0;
+our $opt_f = 0;
+our $opt_test = 0;
+our $opt_t = 0;
+my $success = GetOptions(qw(odyc force f test t));
+
+if(! $success) {
+  _usage("Bad options");
+  exit 0;
+}
+
+###  Choose DSN
+my @DSN;
+my $set_nls_fomat = 0;
+if ( $opt_odyc ) {
+#  @DSN = @ODYC_DSN;
+#  @DSN = ("dbi:Pg:dbname=odyc;host=localhost","odyc","odyc");
+}
+else {
+#  @DSN = @ODYC_DSN;
+#  @DSN = ("dbi:Pg:dbname=capnpcut_icow;host=localhost","capnpcut","dlaovxe7");
+  @DSN = ("dbi:Pg:dbname=tsanet;host=localhost","tsanet","123qwe");
+}
+
+###  Test Mode -> Rollback inserts
+my $test_mode = ( $opt_test || $opt_t ) ? 1 : 0;
+
+
+#########################
+###  Main Runtime
+
+###  Connect
+my $dbh = DBI->connect( @DSN, { RaiseError => 0, AutoCommit => $autocommit } ) or die "Connect Failed : $DBI::errstr";
+
+###  Set the date format
+$dbh->do("alter session set NLS_DATE_FORMAT = 'YYYY-MM-DD HH24:MI:SS'") if $set_nls_fomat;
+
+###  set the search path to get other schemas
+$dbh->do("set search_path = community");
+
+###  Set the SIG INT hanlder
+local $SIG{INT} = sub { 
+  print "Caught SIG INT - Rolling Back DBH\n";
+
+  $dbh->rollback;
+  $dbh->disconnect;
+
+  print "Disconnected - Killing myself, BANG!\n";
+
+  kill 9, $$;
+};
+
+###  Get the table
+my $table = shift @ARGV;
+
+###  Read in the columns line
+my $cols = <>; bug $cols;  $cols =~ s/\r\n/\n/g;  chomp $cols;
+my @fields = &split_delim_line(',',$cols,'"');
+
+###  Prepare the query
+my $sql = "INSERT INTO $table 
+                       ( ". join(',',@fields) ." ) 
+                VALUES ( ". join(',',map {'?'} @fields) ." )
+           ";
+my $sth = $dbh->prepare($sql);
+
+#bug $table;
+print $sql."\n\n";
+#bug \@fields;
+#bug \@DSN;
+
+###  Go through the lines and insert
+my $i = 0;
+while (<>) {
+  s/\r\n/\n/g;
+  chomp;
+  next unless /\S/;
+  my @row = &split_delim_line(',',$_,'"');
+  @row = map {local $^W = 0; $_ =~ /\\N/ ? undef : $_} @row;
+  push @row, undef while (@row < @fields);
+  pop @row while (@row > @fields && ( ! defined $row[-1] || ! length $row[-1] ));
+
+  ###  Add to the table
+  $sth->execute( @row );
+  if ( $DBI::errstr ) {
+    if ( $opt_force || $opt_f ) {
+      warn "Error on transaction : [$sql] : [". join(',',map {defined $_ ? $_ : ''} @row) ."] : [$DBI::errstr]";
+      print "committing...";
+      $dbh->commit;
+    }
+    else {
+      die "Error on transaction : [$sql] : [". join(',',map {defined $_ ? $_ : ''} @row) ."] : [$DBI::errstr]";
+    }
+  }
+  $i++;
+  if ( $i%500 == 0 ) {
+    print "Inserted $i lines : ";
+
+    ###  Commit or rollback
+    if ( !$test_mode && !$autocommit ) {
+      print "committing...";
+      $dbh->commit;
+    }
+    elsif ( $test_mode ) {
+      print "rolling back...";
+      $dbh->rollback;
+    }
+
+    print "\n";
+#    BUG \@row;
+  }
+}
+
+###  Commit or rollback
+if ( !$test_mode && !$autocommit ) {
+  print "committing...\n";
+  $dbh->commit;
+}
+elsif ( $test_mode ) {
+  print "rolling back...\n";
+  $dbh->rollback;
+}
+
+$dbh->disconnect;
+
+
+###  We're done
+print "Done at ".localtime()."\n";
+exit 0;
+
+
+
+
+
+
+
+
+
+
+#########################
+###  Utility Subroutines
+#########################
+
+sub _usage {
+  my $message = shift;
+
+  if(length($message)) {
+    print STDERR
+      "ERROR: $message\n\n";
+  }
+
+  my $program = $0;
+  $program =~ s@^.*/([^/]+)*$@$1@;
+
+  print STDERR 
+    "Usage: $program [OPTION]... TABLE FILE\n",
+    "Insert the data from FILE into database table TABLE.\n\n",
+    "  -f, --force       \tForce, Ignore insertion errors\n",
+    "  -t, --test        \tDo inserts, but rollback\n",
+    "  --odyc           \tUse the ODYC DSN.\n",
+    "  --error           \tUse the ERROR DSN.\n";
+}

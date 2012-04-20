@@ -1,0 +1,88 @@
+#!/usr/bin/perl -w
+
+select((select(STDOUT), $| = 1)[0]);
+
+my $sleep_delay = 1;
+my $width = 150;
+my $max = 10;
+my $char = "0";
+
+
+###  Allow them to change the defaults
+
+foreach ( grep(/^-*(t(ime)?|d(elay)?)=?[\.\d]+/,@ARGV) ) { ($sleep_delay = $_) =~ s/\D//g; }
+foreach ( grep(/^-*w(idth)?=?[\.\d]+/,@ARGV) ) { ($width = $_) =~ s/\D//g; }
+foreach ( grep(/^-*m(ax)?=?[\.\d]+/,@ARGV) ) { $max = &parse_num($_); }
+foreach ( grep(/^-*c(har)?=?.+/,@ARGV) ) { $char = chop($_); }
+
+
+###  Loop
+my $last_load = '-';
+while (1)
+{
+	###  Get the load
+	my $url = "http://'`hostname`'/server-status";
+	my ($uptime, $the_load) = (`curl -s '$url' | grep -i 'total accesses'`);
+	if ( $uptime =~ m@total accesses\s*:\s*([\d\.]+)@i ) {
+#		print $1; exit;
+            $the_load =  $1;
+            $last_load = $the_load if $last_load eq '-';
+            $the_load -= $last_load;
+            $last_load += $the_load;
+
+            ###  Now divide the load by the delay
+            $the_load /= $sleep_delay;
+	}
+	$max = int($the_load)+1 if $the_load > $max;
+
+	###  Create the load bar
+	my $bar = ( $char
+                    x ( 1
+                        + sprintf("%.0f", ( $width * ( $the_load / $max )) )
+                        )
+                    );
+
+        ###  If the max load is less than 2 then make markers at tenth-of-a-point
+        $meter_lines_factor = ( $max < 2 ) ? 10 : ( $max < 20 ? 1 : ( $max < 200 ? .1 : .01));
+
+	###  Put in the load metering lines
+	foreach my $meter (1 .. (($max * $meter_lines_factor) - 1)) {
+            $pos = sprintf("%.0f", ( $width * ($meter / $meter_lines_factor / $max) ) );
+            substr($bar,$pos,1) = " " if length($bar) > $pos;
+        }
+
+	###  Print out the bar
+	print $bar .' -- '. $the_load ." \t    @\t". scalar(localtime)  ."\n";
+	
+	###  Wait the delay
+	`sleep $sleep_delay`;
+}
+
+
+sub human_bytes {
+  local $_;
+  my ( $bytes, $max_prec, $min_prec, $prec_threshold ) = @_;
+  $max_prec ||= 1;
+  $min_prec ||= 0;
+  $prec_threshold ||= 100;
+
+  my @levels = qw( bytes K M G Tb Ex Pb );
+  my $str;
+  foreach my $i (0..$#levels) {
+    $str = $levels[$i];
+    last if $bytes < 1024;
+    $bytes /= 1024;
+  }
+  my $prec = ($bytes < $prec_threshold) ? $max_prec : $min_prec;
+
+  return sprintf("%.${prec}f$str", $bytes);
+}
+
+sub
+pad { (my $replace = $_[0]+(10**$_[1])) =~ s/^1//g;    $replace; }
+
+sub
+parse_num { my $str = shift;    return 0 unless defined $str;    $str =~ s/[^\d\.]//g;    $str =~ s/^(\d*)((?:\.\d+)?)(\..*)?$/$1$2/;    $str =~ s/^0*//;    $str =~ s/0*$// if $str =~ /\./;    $str = 0 unless $str;    $str; }
+
+sub
+real_remainder { my ($num, $r) = @_;    return 0 unless $r;    $num - int($num / $r); }

@@ -1,0 +1,80 @@
+#!/usr/bin/perl 
+
+###############################################
+###################  Main  ####################
+###############################################
+
+my ($str,@x,@y,$body,@body);
+
+format STDOUT =
+@>>>>>>> @>>>>>>> @>>>>>>> @>>>>>>> @>>>>>>> @>>>>>>> @>>>>>>> @>>>>>>>      "@@@@@@@@"
+$x[0],$x[1],$x[2],$x[3],$x[4],$x[5],$x[6],$x[7],                             $y[0],$y[1],$y[2],$y[3],$y[4],$y[5],$y[6],$y[7]
+.
+
+###  Read Contents of a file in @ARGV
+if ($ARGV[0])
+{
+	open(BODY,$ARGV[0]) or die "Could not open $ARGV[0] : $!";
+	@body = <BODY>;
+	close BODY;
+	
+	$body .= join('',@body);
+}
+else 
+{
+	###  Read STDIN and output literal value
+	@body = <STDIN>;
+	$body = join('',@body);
+}
+
+#print "-----------------------\n";
+#print "$body\n";
+#print "-----------------------\n";
+
+foreach ( 0..(int(length($body)/8)+1) ) 
+{ 
+	eval('$str = substr($body,($_*8),8);');
+	$str = '' unless $str;
+
+	###  Hexadecimal Output
+#	foreach (0..7) { if (length($str) > $_) { $x[$_] = sprintf("%2.lx", ord(substr($str,$_,1))); }    else { $x[$_] = '-'; } }
+
+	###  ASCII Number Output
+#	foreach (0..7) { if (length($str) > $_) { $x[$_] = ord(substr($str,$_,1));    $y[$_] = pack("c",$x[$_]); }    else { ($x[$_],$y[$_]) = ('-','-'); } }
+
+	###  Binary string Output
+	foreach (0..7) {
+          if (length($str) > $_) { 
+            my $c = substr($str,$_,1);
+            my $ord = ord($c);
+            $x[$_] = join '', map { int( ($ord & (2**$_)) / (2**$_) ) } reverse(0..7);
+            $y[$_] = pack("c",$ord);
+          }
+          else { ($x[$_],$y[$_]) = ('-','-'); } 
+        }
+	write;
+}
+
+
+
+
+
+
+
+
+
+###############################################
+#################  End Main  ##################
+###############################################
+exit 0;
+
+sub
+pad { (my $replace = $_[0]+(10**$_[1])) =~ s/^1//g;    $replace; }
+
+sub
+alt_pad { my ($num,$len) = shift;    do { substr($num,0,0) = '0'; } until length($num) == $len;     $num; }
+
+sub
+float { sprintf("%.$_[1]f",$_[0]); }
+
+

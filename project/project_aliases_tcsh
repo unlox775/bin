@@ -1,0 +1,59 @@
+#!/bin/tcsh -f
+
+#########################
+###  INSTALLATION
+#  
+#  To Install:
+#  -----------
+#  
+#  1) Copy everything below this section into an rc file for tcsh
+#     (.cshrc or .tcshrc)
+#  
+#  2) Read through the config sections below and tweak for your
+#     preferences (e.g. emacs vs. vim preferences, etc.)
+#  
+#  3) Get trained by someone on how to use the new Project System
+#  
+#########################
+
+#########################
+###  Project System Setup
+
+setenv SYSTEM_TMP_BASE $HOME/sandbox/dave/myproject_tmp
+setenv   SYSTEM_PROJECT_BASE $HOME/sandbox/projects
+###  CVS Repo Settings
+#setenv SYSTEM_CVS_BASE_REGEXP "$HOME/public_html/.sites/.sandbox/\w+/myproject"
+setenv SYSTEM_CVS_BASE $HOME/sandbox/dave/myproject
+setenv            P_BIN_PATH $SYSTEM_CVS_BASE/admin/bin
+
+###  Paths to CVS
+# setenv PATH "$SYSTEM_BIN_PATH":"$PATH"
+
+######  Modify PATH to include the project bin dirs
+###  The project system files
+setenv PATH $P_BIN_PATH":"$PATH
+
+###  CVS helps: uncomment this if you want them
+###    NOTE: these don't currently have docs, but 
+###    as they are REALLY simple, try just looking
+###    at the source.  Or go ask Dave.
+# setenv PATH "$P_BIN_PATH/cvs_helps":"$PATH"
+
+
+###################################
+###  Project Aliases
+alias preg    project_register
+alias pcreate project_create
+alias pswitch project_switch
+alias plist   project_list
+alias paff    project_affected_files
+alias psum    project_summary
+
+###  ###  Operate on affected files
+###  alias aff_stat          'cd $SYSTEM_CVS_BASE; setenv CUR_PROJECT_DIR $SYSTEM_PROJECT_BASE/`cat ~/.current_project`; cvs status `egrep -x -v "\*{3}.+\*{3}" $CUR_PROJECT_DIR/affected_files.txt` | grep "Status:"'
+###  alias aff_proddiff      'cd $SYSTEM_CVS_BASE; setenv CUR_PROJECT_DIR $SYSTEM_PROJECT_BASE/`cat ~/.current_project`; cvs diff -c -rPROD_SAFE `cat $CUR_PROJECT_DIR/affected_files.txt`'
+###  alias aff_testdiff      'cd $SYSTEM_CVS_BASE; setenv CUR_PROJECT_DIR $SYSTEM_PROJECT_BASE/`cat ~/.current_project`; cvs diff -c -rTEST `cat $CUR_PROJECT_DIR/affected_files.txt`'
+###  alias aff_perlwc        'cd $SYSTEM_CVS_BASE; setenv CUR_PROJECT_DIR $SYSTEM_PROJECT_BASE/`cat ~/.current_project`; cat $CUR_PROJECT_DIR/affected_files.txt | egrep -v '\''\.sql$'\'' | ql | xargs -n1 perl -wc'
+###  alias aff_logh          'cd $SYSTEM_CVS_BASE; setenv CUR_PROJECT_DIR $SYSTEM_PROJECT_BASE/`cat ~/.current_project`; cat $CUR_PROJECT_DIR/affected_files.txt | ql | xargs -n1 cvs log -h'
+
+

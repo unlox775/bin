@@ -1,0 +1,72 @@
+alias last_real_culess \
+        'cat ~/.last_culess '\
+                '| less'
+alias last_nosort_culess \
+        'cat ~/.last_culess '\
+                '| sed '"'"'s/^RCS file: /0 -> WARNING MERGING:   &/g'"'"' '\
+                '| sed '"'"'s/^retrieving revision/0 -> WARNING MERGING:   &/g'"'"' '\
+                '| sed '"'"'s/^rcsmerge/0 -> WARNING MERGING:   &/g'"'"' '\
+                '| sed '"'"'s/^Merging/0 -> WARNING MERGING:   &/g'"'"' '\
+                '| sed '"'"'s/^cvs server: conflicts found in/0 -> WARNING MERGING:   &/g'"'"' '\
+                '| sed '"'"'s/^C /0 -> WARNING -- CONFLICT:      &/g'"'"' '\
+                '| sed '"'"'s/^? /0 -> CVS UNKNOWN:   &/g'"'"' '\
+                '| sed '"'"'s/^M /0 -> LOCALLY MODIFIED:   &/g'"'"' '\
+                '| sed '"'"'s/^A /0 -> TO BE ADDED TO CVS:   &/g'"'"' '\
+                '| sed '"'"'s/^R /0 -> TO BE REMOVED FROM CVS:   &/g'"'"' '\
+                '| sed '"'"'s/^cvs server: warning: /0 -> WARNING: &/g'"'"' '\
+                '| sed '"'"'s/^P /0 -> Z CVS UPDATING:   &/g'"'"' '\
+                '| sed '"'"'s/^U /0 -> Z NEW FILE FROM CVS:   &/g'"'"' '\
+                '| less'
+alias last_culess \
+        'cat ~/.last_culess '\
+                '| sed '"'"'s/^RCS file: /0 -> WARNING MERGING:   &/g'"'"' '\
+                '| sed '"'"'s/^retrieving revision/0 -> WARNING MERGING:   &/g'"'"' '\
+                '| sed '"'"'s/^rcsmerge/0 -> WARNING MERGING:   &/g'"'"' '\
+                '| sed '"'"'s/^Merging/0 -> WARNING MERGING:   &/g'"'"' '\
+                '| sed '"'"'s/^cvs server: conflicts found in/0 -> WARNING MERGING:   &/g'"'"' '\
+                '| sed '"'"'s/^C /0 -> WARNING -- CONFLICT:      &/g'"'"' '\
+                '| sed '"'"'s/^? /0 -> CVS UNKNOWN:   &/g'"'"' '\
+                '| sed '"'"'s/^M /0 -> LOCALLY MODIFIED:   &/g'"'"' '\
+                '| sed '"'"'s/^A /0 -> TO BE ADDED TO CVS:   &/g'"'"' '\
+                '| sed '"'"'s/^R /0 -> TO BE REMOVED FROM CVS:   &/g'"'"' '\
+                '| sed '"'"'s/^cvs server: warning: /0 -> WARNING: &/g'"'"' '\
+                '| sed '"'"'s/^P /0 -> Z CVS UPDATING:   &/g'"'"' '\
+                '| sed '"'"'s/^U /0 -> Z NEW FILE FROM CVS:   &/g'"'"' '\
+                '| sort '\
+                '| less'
+alias culess \
+        'cu \!* '\
+                '| & fgrep -v -f ~/.cvs_skip_files -x '\
+                '> ~/.last_culess '\
+        '; last_culess'
+alias cuhless \
+        'cuh \!* '\
+                '| & fgrep -v -f ~/.cvs_skip_files -x '\
+                '> ~/.last_culess '\
+        '; last_culess'
+alias cubless \
+        'cub \!* '\
+                '| & fgrep -v -f ~/.cvs_skip_files -x '\
+                '> ~/.last_culess '\
+        '; last_culess'
+alias cu 'cvs update -Pfd'
+alias cub 'cvs update -Pfd -r `cat ~/codelinks/_current_/.branch`'
+alias cb 'cvs tag -b `cat ~/codelinks/_current_/.branch` \!* ; cub \!*'
+alias cbmerge 'cvs update -Ad \!* ; cu -j `cat ~/codelinks/_current_/.branch` \!*'
+alias cbmergeh2b 'cvs update -Ad \!:1 ; cu -j `cat ~/codelinks/_current_/.branch` \!:1 ; mv \!:1 \!:1_tmp ; cub \!:1 ; mv -i \!:1_tmp \!:1'
+alias cbleap 'cleap `cat ~/codelinks/_current_/.branch` \!*'
+alias cbdiff 'cdiff -r`cat ~/codelinks/_current_/.branch` -rHEAD \!*'
+alias cleap 'cvs update -r\!:1 \!:2 ;  mv -i \!:2 \!:2\_\~\!:1\~;  cuh \!:2;  mv -i \!:2\_\~\!:1\~ \!:2;'
+alias cnew_binary 'mv -i \!:1 \!:1\_\~new\~;  cuh \!:1;  mv -f \!:1\_\~new\~ \!:1;'
+alias cu_head 'cuh'
+alias cuh 'cvs update -PAd'
+alias cx 'cvs commit'
+alias ci 'cx'
+alias ca 'cvs add \!*'
+alias co 'cvs co'
+alias diff 'diff -w -C 3'
+alias cdiff 'cvs diff -w -C 3'
+alias cl 'cvs log \!* | less'
+unalias cll
+alias crm 'set removefiles = `echo \!*` && rm -i $removefiles && cvs remove $removefiles && ci $removefiles && unset $removefiles '
+ 

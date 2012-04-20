@@ -1,0 +1,5 @@
+#!/bin/bash -norc
+
+cvs update -r$1 $2 ;
+mv -i $2 $2\_\~$1\~;
+cuh $2;  mv -i $2\_\~$1\~ $2; 

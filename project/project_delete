@@ -1,0 +1,52 @@
+#!/usr/bin/perl -w
+
+#########################
+###  project_delete
+#
+# Version : $Id: project_delete,v 1.3 2011/05/23 15:11:46 dave Exp $
+#
+#########################
+
+###  Pragmas
+use strict;
+
+#########################
+###  Configuration, Setup
+
+###  Globals
+my $SYSTEM_PROJECT_BASE = $ENV{SYSTEM_PROJECT_BASE} || '/sandbox/projects';
+if ( $ENV{SYSTEM_CVS_BASE_REGEXP} ) {
+    ( $ENV{SYSTEM_CVS_BASE} ) = ( `tcsh -f -c pwd` =~ /^($ENV{SYSTEM_CVS_BASE_REGEXP})/ );
+}
+(my $SYSTEM_CVS_BASE = $ENV{SYSTEM_CVS_BASE} || "$ENV{HOME}/dev" ) =~ s@/+$@@;
+
+###  Get the Project file
+my $curr_project;
+if ( $ARGV[0] =~ /^[\.\w]+$/
+     && -d "$SYSTEM_PROJECT_BASE/$ARGV[0]"
+     ) {
+    $curr_project = shift @ARGV;
+}
+elsif ( -d "$SYSTEM_PROJECT_BASE/archive/$ARGV[0]" ) {
+    die "That project has already been archived\n";
+}
+elsif ( ! -d "$SYSTEM_PROJECT_BASE/$ARGV[0]" ) {
+    die "Project does not exist\n";
+}
+else {
+    die "Please specify a project name\n";
+}
+
+###  Check out the project
+if ( ! -w "$SYSTEM_PROJECT_BASE/$curr_project" ) {
+    die "Can't delete project: permission denied\n";
+}
+
+
+#########################
+###  Main Runtime
+
+`rm -Rf $SYSTEM_PROJECT_BASE/$curr_project`;
+warn "Project Removed : $curr_project\n";
+
+exit 0;

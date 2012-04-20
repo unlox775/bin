@@ -1,0 +1,5 @@
+#!/usr/bin/perl
+
+if ( `ps -aux | grep pine | grep -v grep` ) {
+  exec(qw(fetchmail -s));
+}

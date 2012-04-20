@@ -1,0 +1,4 @@
+#!/bin/tcsh -f
+
+/usr/X11R6/bin/xlock -nice 20 -mode random -erasemode no_fade -modelist 'ifs galaxy gears superquadrics mandelbrot kumppa thornbird atlantis flow' -duration 600 ; \
+

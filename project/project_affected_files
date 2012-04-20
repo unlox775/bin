@@ -1,0 +1,24 @@
+#!/usr/bin/perl -w
+
+#########################
+###  project_summary
+#
+# Version : $Id: project_affected_files,v 1.1 2011/05/23 15:11:46 dave Exp $
+#
+#########################
+
+###  Pragmas
+use strict;
+
+#########################
+###  Configuration, Setup
+
+###  Globals
+my $SYSTEM_PROJECT_BASE = $ENV{SYSTEM_PROJECT_BASE} || '/sandbox/projects';
+if ( $ENV{SYSTEM_CVS_BASE_REGEXP} ) {
+    ( $ENV{SYSTEM_CVS_BASE} ) = ( `tcsh -f -c pwd` =~ /^($ENV{SYSTEM_CVS_BASE_REGEXP})/ );
+}
+(my $SYSTEM_CVS_BASE = $ENV{SYSTEM_CVS_BASE} || "$ENV{HOME}/dev" ) =~ s@/+$@@;
+
+my $EDITOR = $ENV{EDITOR} || 'vim';
+exec "$EDITOR $SYSTEM_PROJECT_BASE/".`cat $SYSTEM_CVS_BASE/../.current_project` ."/affected_files.txt";

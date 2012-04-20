@@ -1,0 +1,14 @@
+#!/usr/bin/perl -w
+
+my $time = 30;
+if ($ARGV[0] =~ /^-(\d+)$/) { $time = $1;    shift @ARGV; }
+
+my $str = join(' ',@ARGV);
+
+my $size = (length($str) + 10) . "x1+150+500";
+
+if ( `/usr/bin/w | /usr/bin/grep -v grep| /usr/bin/egrep '^david' | /usr/bin/grep 'tricorder.'` ) 
+{
+	`/usr/X11R6/bin/xterm -sl 2000 -display tricorder:0.0 -fn -adobe-helvetica-bold-r-normal--24-*-*-*-*-*-* -geometry $size -title "$str" -e ~/bin/xwindows/popup -$time "$str"`;
+}
+else { print STDERR "David is not logged in on console currently.\n"; }

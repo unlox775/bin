@@ -1,0 +1,190 @@
+#!/usr/bin/perl -w
+
+use strict;
+use Term::Complete;
+
+
+#######  Configuration
+###  The projects directory
+my $projects_directory = "$ENV{HOME}/work/projects";
+
+
+###  Get the list of projects
+my @projects = map { 
+  s/^.*\///g;
+  
+  $_;
+} <$projects_directory/*>;
+
+
+###  Separate the list of BUGS into the hash %bugs
+my %bugs = map { /^BUG_(\d+)_(.*)$/s ? ($1,$_) : () } @projects;
+
+
+###  Now, cut out the projects aren't valid projects
+@projects = grep( 
+                  ! /(^BUG_(\d+)_.*|_last_|_current_|.txt)$/s, 
+                  @projects
+                  );
+
+
+###  Use the first Argument by default
+my $which = $ARGV[0];
+
+###  If the first argument was empty, then prompt:
+if ( ! $which )
+{
+
+  ###  Print out the list of BUGS
+  if ( %bugs ) {
+    print "\nBUGS to Switch to:\n\n";
+    print "\t" . join( 
+                       "\n\t",
+                       ( 
+                         map { 
+                           $_ . ".\t" . $bugs{$_} . ( 
+                                                      ( 
+                                                        ( ! -e "$projects_directory/$bugs{$_}/summary.txt" ) &&
+                                                        ( ! -e "$projects_directory/$bugs{$_}/complete_summary.txt" ) &&
+                                                        ( ! -e "$projects_directory/$bugs{$_}/completed_summary.txt" ) &&
+                                                        ( ! -e "$projects_directory/$bugs{$_}/finish_summary.txt" ) &&
+                                                        ( ! -e "$projects_directory/$bugs{$_}/finished_summary.txt" ) &&
+                                                        ( ! -e "$projects_directory/$bugs{$_}/cancel_summary.txt" ) &&
+                                                        ( ! -e "$projects_directory/$bugs{$_}/cancelled_summary.txt" )
+                                                        )
+                                                      ? " --> NO SUMMARY "
+                                                      : ''
+                                                      ); 
+                         }
+                         grep( 
+                               ( 
+                                 ###  Don't Filter out any if we're being called by 
+                                 ###    an 'all' version of this command
+                                 ( $0 =~ /all$/s ) ||
+
+                                 ###  Filter out completed projects
+                                 ( 
+                                   ( ! -e "$projects_directory/$bugs{$_}/complete_summary.txt" ) &&
+                                   ( ! -e "$projects_directory/$bugs{$_}/completed_summary.txt" ) &&
+                                   ( ! -e "$projects_directory/$bugs{$_}/finish_summary.txt" ) &&
+                                   ( ! -e "$projects_directory/$bugs{$_}/finished_summary.txt" ) &&
+                                   ( ! -e "$projects_directory/$bugs{$_}/cancel_summary.txt" ) &&
+                                   ( ! -e "$projects_directory/$bugs{$_}/cancelled_summary.txt" )
+                                   )
+                                 ),
+                               sort { ( $a =~ /(\d+)/ )[0] <=> ( $b =~ /(\d+)/ )[0]; } keys %bugs
+                               )
+                         )
+                       ) . "\n\n";
+  }
+
+
+  ###  Print out the list of projects
+  print "\nProjects to Switch to:\n\n";
+  print "\t" . join( 
+                     "\n\t",
+                     ( 
+                       map {
+                         ( $_ + 1 ) . ".\t" . $projects[$_] . ( 
+                                                                ( 
+                                                                  ( ! -e "$projects_directory/$projects[$_]/summary.txt" ) &&
+                                                                  ( ! -e "$projects_directory/$projects[$_]/complete_summary.txt" ) &&
+                                                                  ( ! -e "$projects_directory/$projects[$_]/completed_summary.txt" ) &&
+                                                                  ( ! -e "$projects_directory/$projects[$_]/finish_summary.txt" ) &&
+                                                                  ( ! -e "$projects_directory/$projects[$_]/finished_summary.txt" ) &&
+                                                                  ( ! -e "$projects_directory/$projects[$_]/cancel_summary.txt" ) &&
+                                                                  ( ! -e "$projects_directory/$projects[$_]/cancelled_summary.txt" )
+                                                                  )
+                                                                ? " --> NO SUMMARY "
+                                                                : ''
+                                                                ); 
+                       } 
+                       grep( 
+                             ( 
+                               ###  Don't Filter out any if we're being called by 
+                               ###    an 'all' version of this command
+                               ( $0 =~ /all$/s ) ||
+
+                               ###  Filter out completed projects
+                               ( 
+                                 ( ! -e "$projects_directory/$projects[$_]/complete_summary.txt" ) &&
+                                 ( ! -e "$projects_directory/$projects[$_]/completed_summary.txt" ) &&
+                                 ( ! -e "$projects_directory/$projects[$_]/finish_summary.txt" ) &&
+                                 ( ! -e "$projects_directory/$projects[$_]/finished_summary.txt" ) &&
+                                 ( ! -e "$projects_directory/$projects[$_]/cancel_summary.txt" ) &&
+                                 ( ! -e "$projects_directory/$projects[$_]/cancelled_summary.txt" )
+                                 )
+                               ),
+                             ( 0 .. $#projects )
+                             )
+                       )
+                     ) . "\n\n";
+  
+  ###  Get their selection
+  $which = Complete( 
+                     "Which BUG or project do you want to switch to: ", 
+                     [ 
+                       @projects,
+                       ( 1 .. scalar @projects ),
+                       values %bugs,
+                       keys %bugs,
+                       ]
+                     );
+
+}
+
+###  Turn a Project number into the value
+$which = $projects[ ( $which - 1 ) ] if ( $which =~ /^\d+$/s ) && ( $projects[ ( $which - 1 ) ] );
+
+###  Turn a BUG number into the value
+$which = $bugs{ $which } if ( $which =~ /^\d+$/s ) && ( $bugs{ $which } );
+
+
+###  Exit unless valid
+if ( ! grep( ($which eq $_), @projects, values %bugs ) ) {
+  print STDERR "  --INVALID project - '$which'\n\n" unless grep( ($which eq $_), @projects );
+  exit 100;
+}
+
+
+
+######  If they are already on this project, then do nothing
+###  Get what we're currently linked to
+my $last_link = readlink("$projects_directory/_current_") || "$projects_directory/$which";
+
+###  If it is not different, then don't switch
+if ( 
+     ( ! readlink("$projects_directory/_current_") ) ||
+     ( $last_link eq "$projects_directory/$which" )
+     ) {
+  print "\nAlready on that project...\n";
+  
+  exit 0;
+}
+
+
+
+###  Do the switch
+print "\nSwitching project to $which...\n";
+
+
+###  Remove the files in the way
+unlink "$projects_directory/_last_", "$projects_directory/_current_";
+
+###  Now run the symlinking and check for success
+( 
+  symlink("$projects_directory/$which", "$projects_directory/_current_") &&
+  symlink($last_link, "$projects_directory/_last_")
+  ) || die "Symlinking failed";
+
+
+######  Now write the .switch_tos and .switch_froms files
+###  Append the .switch_froms file in the _last_ directory
+open SWITCH_FROM, ">>$projects_directory/_last_/.switch_froms" or die "Could not open .switch_froms file '$projects_directory/_last_/.switch_froms' for appending : $!";
+print SWITCH_FROM time() . "\n";
+close SWITCH_FROM;
+
+###  Append the .switch_tos file in the _current_ directory
+open SWITCH_TO, ">>$projects_directory/_current_/.switch_tos" or die "Could not open .switch_tos file '$projects_directory/_current_/.switch_tos' for appending : $!";
+print SWITCH_TO time() . "\n";
+close SWITCH_TO;

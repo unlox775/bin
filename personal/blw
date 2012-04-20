@@ -1,0 +1,30 @@
+#!/bin/tcsh -f
+
+set h = 0;
+if ($1) set h = `expr \( 128 \* \( $1 - 1 \) \)`;
+
+set label = $HOST;
+if ("$label" =~ sapphire*) set label = "Database Server";
+if ("$label" =~ amber*) set label = "File Server";
+if ("$label" =~ jade*) set label = "Web Server";
+if ("$label" =~ topaz*) set label = "Mail Server";
+if ("$label" =~ onyx*) set label = "DNS Server";
+
+
+xload 	-scale 2 \
+	-hl blue \
+	-label "$label 1 hr 46:40 Span (Every 5 Secs)" \
+	-display laforge.Inetz.COM:0.0 \
+        -xrm "*Desk:1" \
+	-geometry 1274x122+0-$h \
+	-fg yellow &
+
+xload   -scale 2 \
+        -hl blue \
+        -label "$label 2 Day Span ( Every 2:15 (135 Secs) )" \
+        -update 135 \
+        -display laforge.Inetz.COM:0.0 \
+        -xrm "*Desk:1" \
+        -geometry 1274x122+1280-$h \
+        -fg yellow &
+

@@ -1,0 +1,15 @@
+#!/bin/tcsh -f
+
+######  DISABLED 11/21/00 when I started using XWin32
+###  unsetenv BLWSTART
+###  if ($?1) then
+###  	if ($1 != '') then
+###  		setenv BLWSTART $1
+###  	endif
+###  endif
+
+xterm +sb -cr green -hc blue -iconic \#+0+0 -geometry 150x70+15+60 -T main -n main -e screen -d -RR main &
+#rxvt +sb -tn rxvt -fn 6x13 -iconic -geometry 150x70+15+60 -name main &
+
+
+

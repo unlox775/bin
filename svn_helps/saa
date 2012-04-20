@@ -1,0 +1,4 @@
+#!/bin/tcsh -f
+
+sa `svn status | & perl -pe '(s/^\? / / && s/\s?\n$//s) || ($_ = "");'`
+ 

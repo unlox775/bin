@@ -1,0 +1,3 @@
+#!/bin/sh
+
+cat | /usr/local/bin/pgpe -fast -r `echo $* | sed 's/ / -r /g' `

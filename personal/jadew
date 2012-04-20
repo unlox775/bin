@@ -1,0 +1,5 @@
+#!/bin/sh
+
+xterm +sb -cr green -hc blue -iconic \#-240+1 -geometry 146x30+117+569 -T jade -n jade -e screen -d -RR jade &
+#rxvt +sb -tn rxvt -fn 6x13 -iconic -geometry 146x30+117+569 -name jade &
+

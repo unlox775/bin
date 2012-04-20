@@ -1,0 +1,4 @@
+#!/bin/bash -norc
+
+cvs tag -b `cat ~/.branch` $*
+cub $* 

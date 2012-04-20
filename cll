@@ -1,0 +1,41 @@
+#!/usr/bin/perl -w
+
+###  Get rid of any ***  comment *** stuff in the 
+###    @ARGV as well as leading and trailing spaces
+###    and blank parameters
+@ARGV = map {
+
+  ###  Take out any *** comment *** stuff
+  s/\*+.+\*+//g;
+
+  ###  Strip leading and trailing spaces
+  s/^\s+|\s+$//sg;
+  
+  ###  Drop blank parameters
+  ( ! /^\s*$/s )
+    ? $_
+      : ();
+
+} @ARGV;
+
+
+###  Call the command and setup the Filehandle to read the output
+###    Get rid of and hide STDERR output
+open CVSLOG, 'cvs log "' . join('" "', @ARGV) . '" 2>&1 |';
+
+###  Go through the output
+while ( <CVSLOG> ) { 
+  $l ||= 0;  
+  $a ||= 0;  
+  $l++; 
+  $a++ if /^---/;  
+  $_ = "" if (($a == 0) && ($l > 2)) || /^date: 200\d\//;  
+  s@^RCS file: /cvsroot/sys/free/|,v(?=\s)@@g;  
+  if ( $a == 2 && /^---/ ) { 
+    print "\n\n";  
+    exit; 
+  }
+
+  print;
+}
+

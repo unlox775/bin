@@ -1,0 +1,4 @@
+#!/bin/tcsh -f
+
+svn move $*
+
