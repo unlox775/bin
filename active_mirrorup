@@ -1,0 +1,23 @@
+#!/bin/tcsh -f
+
+set hostname=$1
+set remote_dir=$2
+set local_dir=$3
+set rsync_flags = 'rlpDzv --size-only'
+
+while(1)
+
+	clear;
+	php -r 'echo str_repeat("\n",rand(1,6));'
+
+	echo -n "\033[31\;40m"
+	echo "             --------->  DANGER\!\!\!  Don't leave this on for long\!  <---------            "
+	echo -n "\033[0m"                               # Reset colors to "normal."
+	
+	echo " "
+	echo "=====  Syncing from Local OVER Remote\!\!\!  ====="
+	rsync -$rsync_flags --progress --exclude=sftp-config.json --exclude=.git --delete ~/mirrors/$local_dir/. $hostname":"$remote_dir/. 
+
+	echo " "
+	php -r 'foreach ( range($argv[1],1) as $x ) { echo "\rRefreshing in $x seconds...    "; sleep(1); }' 20
+end
