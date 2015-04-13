@@ -1,0 +1,4 @@
+#!/bin/tcsh -f
+
+svn revert `svn status |grep "^ M      " |sed s/" M      "// |tr '\n', ' '`
+ 

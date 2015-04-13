@@ -1,0 +1,3 @@
+#!/bin/bash -norc
+
+git branch | perl -pe 'if (/^\*\s*\s(\S+)/) { $_ = $1; } else { $_ = ""; }'

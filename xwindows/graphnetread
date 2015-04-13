@@ -21,7 +21,9 @@ my $last_load = '-';
 while (1)
 {
 	###  Get the load
-	my ($uptime, $the_load) = (`ifconfig | grep -A9 eth0 | grep 'RX bytes'`);
+	my ($uptime, $the_load);
+	if ( $ENV{'THIS_OS'} && $ENV{'THIS_OS'} eq 'mac' ) { $uptime = 'RX bytes: '. ( split(/\s+/, `netstat -b -I en1 | grep en1 | head -n1` ) )[6]; }
+	else {                                               $uptime = `ifconfig | grep -A9 eth0 | grep 'RX bytes'`; }
 	if ( $uptime =~ /RX bytes:\s*([\d\.]+)/i ) {
             $the_load =  &parse_num($1 / (1024 * 1024));
             $last_load = $the_load if $last_load eq '-';

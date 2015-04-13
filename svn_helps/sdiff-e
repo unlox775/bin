@@ -1,0 +1,4 @@
+#!/bin/bash -norc
+
+svn diff -x "-uw --ignore-eol-style" $* > ~/.emacs-sdiff.patch
+exec emacs ~/.emacs-sdiff.patch

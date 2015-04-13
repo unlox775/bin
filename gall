@@ -1,0 +1,6 @@
+#/bin/tcsh -f
+
+echo "  "; echo 'glasses-web1';echo '----------------------------'; ssh dave@glasses-web1 $*;
+echo "  "; echo 'glasses-web2';echo '----------------------------'; ssh dave@glasses-web2 $*;
+echo "  "; echo 'glasses-web3';echo '----------------------------'; ssh dave@glasses-web3 $*;
+echo "  "; echo 'glasses-web4';echo '----------------------------'; ssh dave@glasses-web4 $*;

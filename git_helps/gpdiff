@@ -1,0 +1,4 @@
+#!/usr/bin/perl -w
+
+system('git', 'fetch');
+system('git', 'diff', '-w', '--cached', 'origin/'.`gcb`, @ARGV);

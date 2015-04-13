@@ -3,7 +3,7 @@
 set hostname=$1
 set remote_dir=$2
 set local_dir=$3
-set rsync_flags = 'rlpDzv --size-only'
+set rsync_flags = 'rlpDzv'
 
 while(1)
 
@@ -16,6 +16,7 @@ while(1)
 	
 	echo " "
 	echo "=====  Syncing from Local OVER Remote\!\!\!  ====="
+	echo "||| -" ~/mirrors/$local_dir/. '==>' $hostname":"$remote_dir/.
 	rsync -$rsync_flags --progress --exclude=sftp-config.json --exclude=.git --delete ~/mirrors/$local_dir/. $hostname":"$remote_dir/. 
 
 	echo " "

@@ -1,0 +1,4 @@
+#!/bin/bash -norc
+
+cat ~/.last_guless | less
+ 

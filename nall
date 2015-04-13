@@ -1,0 +1,6 @@
+#/bin/tcsh -f
+
+echo "  "; echo 'naartjie-web1';echo '----------------------------'; ssh dave@naartjie-web1 $*;
+echo "  "; echo 'naartjie-web2';echo '----------------------------'; ssh dave@naartjie-web2 $*;
+echo "  "; echo 'naartjie-web3';echo '----------------------------'; ssh dave@naartjie-web3 $*;
+echo "  "; echo 'naartjie-web4';echo '----------------------------'; ssh dave@naartjie-web4 $*;

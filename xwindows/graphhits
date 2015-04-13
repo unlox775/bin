@@ -21,7 +21,7 @@ my $last_load = '-';
 while (1)
 {
 	###  Get the load
-	my $url = "http://'`hostname`'/server-status";
+	my $url = "http://localhost/server-status";
 	my ($uptime, $the_load) = (`curl -s '$url' | grep -i 'total accesses'`);
 	if ( $uptime =~ m@total accesses\s*:\s*([\d\.]+)@i ) {
 #		print $1; exit;

@@ -1,0 +1,12 @@
+#!/usr/bin/php
+<?php
+while($s = fgetcsv(STDIN,0," ")) {
+	array_unshift($s, $s[5]);
+	array_unshift($s,$s[7]);
+	array_unshift($s,
+		$s[2][0] == '['
+		? date("Y-m-d H:i:s",strtotime(trim($s[2]." ".$s[3]." ".$s[4]." ".$s[5]." ".$s[6],"/\[\]/")))
+		: date("Y-m-d H:i:s",strtotime(trim($s[5]." ".$s[6],"/\[\]/")))
+		);
+	print(join(" ",$s))."\n";
+}

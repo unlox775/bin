@@ -1,0 +1,3 @@
+#!/bin/bash -norc
+
+mv -i $1 $1\_\~new\~;  cuh $1;  mv -f $1\_\~new\~ $1; 

@@ -1,0 +1,5 @@
+#!/bin/bash -norc
+
+git fetch
+gdiff origin/`gcb`
+ 

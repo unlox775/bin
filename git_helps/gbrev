@@ -1,0 +1,4 @@
+#!/bin/bash -norc
+
+git log --stop-on-copy . | perl -e 'my $r = 0; while (<>) { if (/^r(\d+)\s+\|\s+/) { $r = $1; } } print $r'
+

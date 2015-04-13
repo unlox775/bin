@@ -1,0 +1,3 @@
+#!/bin/bash -norc
+
+cat ~/.last_ssless | sed 's/^RCS file: /0 -> WARNING MERGING:   &/g' | sed 's/^retrieving revision/0 -> WARNING MERGING:   &/g' | sed 's/^rcsmerge/0 -> WARNING MERGING:   &/g' | sed 's/^Merging/0 -> WARNING MERGING:   &/g' | sed 's/^git server: conflicts found in/0 -> WARNING MERGING:   &/g' | sed 's/^C /0 -> WARNING -- CONFLICT:      &/g' | sed 's/^? /0 -> GIT UNKNOWN:   &/g' | sed 's/^M /0 -> LOCALLY MODIFIED:   &/g' | sed 's/^A /0 -> TO BE ADDED TO GIT:   &/g' | sed 's/^R /0 -> TO BE REMOVED FROM GIT:   &/g' | sed 's/^git server: warning: /0 -> WARNING: &/g' | sed 's/^G /0 -> Z GIT UPDATING:   &/g' | sed 's/^U /0 -> Z NEW FILE FROM GIT:   &/g' | sort | less 

@@ -1,0 +1,6 @@
+#!/bin/bash -norc
+
+git fetch
+git pull origin `gcb`
+gs $*
+ 

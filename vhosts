@@ -1,0 +1,72 @@
+#!/usr/bin/php
+<?php
+$sr = new SecurityReview();
+$sr->pathToURLs();
+
+class SecurityReview {
+	public $apache_path = false;
+
+	public function __construct() {
+		if ( empty( $this->apache_path ) && preg_match('@^.+?(Server\s+Root).+?<tt>\s*(/[^<]+).+?$@mi', file_get_contents("http://localhost/server-info"), $m ) ) {
+			$this->apache_path = $m[2];
+		}
+	}
+	function pathToURLs() {
+		///  Run and loop in input
+		$descriptorspec = array(
+								0 => array("pipe", "r"),  // stdin is a pipe that the child will read from
+								1 => array("pipe", "w"),  // stdout is a pipe that the child will write to
+								2 => array("file", "/tmp/security_review-vhosts.out", "a") // stderr is a file to write to
+								);
+
+		$this->pathToURLs__all_docroots = array();
+
+		///  Use the APACHE_CONF param and search for that dir
+		$process = proc_open('find -H '. $this->apache_path .' -type f -print0 | xargs -0 cat', $descriptorspec, $pipes, '/tmp', array());
+		$this->readVhostFileHandle($pipes[1]);
+		///  Echo STDOUT,  >>> even if in quiet mode <<<
+	fwrite(STDERR,file_get_contents($descriptorspec[2][1]));
+		unlink($descriptorspec[2][1]);
+
+		///  Search all the Vhosts listed in http://localhost/server-info
+		///    NOTE: any duplication is ignored...
+		$process = proc_open('curl -s http://localhost/server-info | php -r \'while($_ = fgets(STDIN)) { echo preg_replace("/(^|>)\s+\d*\:/","$1\n",str_replace(array("&nbsp;","&lt;","&gt;"),array(" ","<",">"),strip_tags($_))); }\'',$descriptorspec, $pipes, '/tmp', array());
+		$this->readVhostFileHandle($pipes[1]);
+		///  Echo STDOUT,  >>> even if in quiet mode <<<
+		fwrite(STDERR,file_get_contents($descriptorspec[2][1]));
+		unlink($descriptorspec[2][1]);
+		
+		print_r(array('ALL VHOSTS', $this->pathToURLs__path_to_urls_map ));
+	}
+
+
+	public function readVhostFileHandle($fh) {
+		$in_vhost = false;
+		$this_vhost = array();
+		while ($line = fgets($fh) ) {
+			if ( preg_match('/^\s*#/',$line) ) { continue; }
+			if ( preg_match('/^\s*Include (.+)$/',$line, $m) && file_exists(trim($m[1])) ) {
+				$sub_fh = fopen(trim($m[1]), 'r');
+				$this->readVhostFileHandle($sub_fh);
+				fclose($sub_fh);
+			}
+			if ( $in_vhost && preg_match('@^\s*</virtualhost@i',$line) )                        { $in_vhost = false; $this_vhost = array(); continue; }
+			if ( ! $in_vhost && preg_match('/^\s*<virtualhost(?:\s+([\d\.]+)|\s*|\s*\*)(?::(\d+))\s*>/i',$line,$m) ) { $in_vhost = true;  $this_vhost['ip'] = $m[1]; $this_vhost['proto'] = ( isset($m[2]) && $m[2] == 443 ) ? 'https://' : 'http://'; continue; }
+			if ( ! $in_vhost ) { continue; }
+		
+			///  Parse Vhost block
+			if ( preg_match('/^\s*ServerName (\S+)/i',  $line,$m) ) { $this_vhost['domain']  = $m[1]; }
+			if ( preg_match('/^\s*DocumentRoot (\S+)/i',$line,$m) ) { $this_vhost['docroot'] = preg_replace('@/+$@','',$m[1]); }
+				
+			if ( isset( $this_vhost['docroot'] ) && isset( $this_vhost['domain'] ) && is_dir($this_vhost['docroot']) ) {
+				$r_docroot = realpath($this_vhost['docroot']);
+				$this->pathToURLs__path_to_urls_map[ $r_docroot ][ $this_vhost['proto'].$this_vhost['domain'].'/' ] = $this_vhost['docroot'];
+				$this->pathToURLs__all_docroots[     $r_docroot ][ $this_vhost['proto'].$this_vhost['domain'].'/' ] = $this_vhost['docroot'];
+			}
+		}
+	}
+}
+
+
+
+

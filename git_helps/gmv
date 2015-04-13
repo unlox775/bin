@@ -1,0 +1,4 @@
+#!/bin/tcsh -f
+
+git mv $*
+

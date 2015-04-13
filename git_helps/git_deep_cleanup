@@ -1,0 +1,49 @@
+#!/usr/bin/perl -w
+
+use File::Find;
+
+if ( ! @ARGV ) { @ARGV = qw( . ); }
+
+find(\&entries_scrub, @ARGV);
+sub entries_scrub {
+    return unless /^entries$/ && -e './all-wcprops';
+    my $file = $_;
+
+    my $rewrite_files = 0;
+
+    my $entries_perms_bak = sprintf("0%o", (stat('./entries'))[2] & 07777);
+    chmod(0644, './entries');
+    open(ENTRIES, '+<./entries') or die "could not open entries : $!";
+    my @entries = <ENTRIES>; # slurp in the whole file
+
+    my $wcprops_perms_bak = sprintf("0%o", (stat('./all-wcprops'))[2] & 07777);
+    chmod(0644, './all-wcprops');
+    open(WCPROPS, '+<./all-wcprops') or die "could not open all-wcprops : $!";
+    my @wcprops = <WCPROPS>; # slurp in the whole file
+
+    ###  Compare the versions of the directory itself
+    my ( $dir_en_ver, $dir_wc_ver ) = ( ($entries[3] =~ /^(\d+)/)[0], ($wcprops[3] =~ m@^/git/\w+/\!git/ver/(\d+)@)[0] );
+    if ( $dir_en_ver != $dir_wc_ver ) {
+        $pwd = `pwd`;  chomp($pwd);  print "Directory revisions DIDN'T MATCH: entries: $dir_en_ver, all-wcprops: $dir_wc_ver in $pwd, Reverting to earlier...\n";
+        my $winner = ( $dir_en_ver < $dir_wc_ver ) ? $dir_en_ver : $dir_wc_ver;
+        $entries[3] =~ s/^(\d+)/$winner/g;
+        $wcprops[3] =~ s@^(/git/\w+/\!git/ver/)(\d+)@$1$winner@;
+
+        $rewrite_files = 1;
+    }
+
+    ###  Rewrite the files...
+    if ( $rewrite_files ) {
+        seek(ENTRIES,0,0);
+        seek(WCPROPS,0,0);
+        print ENTRIES @entries;
+        truncate ENTRIES, tell ENTRIES;
+        print WCPROPS @wcprops;
+        truncate WCPROPS, tell WCPROPS;
+    }
+
+    close(ENTRIES);
+    close(WCPROPS);
+    chmod(oct($wcprops_perms_bak), './all-wcprops');
+    chmod(oct($entries_perms_bak), './entries');
+}
