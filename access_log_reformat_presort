@@ -28,5 +28,5 @@ while($os = fgets(STDIN)) {
 		? date("Y-m-d H:i:s",strtotime(trim($s[2]." ".$s[3]." ".$s[4]." ".$s[5]." ".$s[6],"/\[\]/")))
 		: date("Y-m-d H:i:s",strtotime(trim($s[5]." ".$s[6],"/\[\]/")))
 		);
-	print(join(" ",$s))."\n";
+	print(join(" ",$s)).'|||---|||'.rtrim($os)."\n";
 }

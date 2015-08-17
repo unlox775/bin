@@ -3,7 +3,28 @@
 set hostname=$1
 set remote_dir=$2
 set local_dir=$3
+
 set rsync_flags = 'rlpDzv --size-only'
+set ssh_command = '-r'
+# set rsync_flags = 'azv'
+
+if ($#argv == 4) then
+	set user=$4
+else
+    set user=$USER
+endif
+
+if ($#argv == 5) then
+	set user=$4
+	set rsync_flags = 'rlpDzv --size-only -e '
+	set ssh_command = 'ssh -p '$5
+else
+    set user=$USER
+endif
+
+# echo rsync -$rsync_flags "$ssh_command" 
+# # exit;
+# set echo = 1
 
 while(1)
 
@@ -13,12 +34,15 @@ while(1)
 	###  Backup which local files are about to be overwritten
 	echo "=====  Backing up about-to-be-overwritten files...  ====="
 	mkdir -p ~/mirrors/_isync_backups/$local_dir
-	cd ~/mirrors/$local_dir/ ; rsync -$rsync_flags -n --progress --exclude=sftp-config.json --exclude=.git --delete $hostname":"$remote_dir/. ~/mirrors/$local_dir/. | & egrep -v '^(receiving file list ...|$|sent [0-9]+ bytes  received [0-9]+ bytes|total size is [0-9]+  speedup is)' | perl -pe 's/(\x20\d+ files\.\.\.\x0d|\d+ files to consider\x0a)//g; s/^deleting //' | php -r 'while($_ = fgets(STDIN)){ $t = rtrim($_,"\n"); if ( file_exists($t) && ! is_dir($t) ) echo $_; }' | ~/bin/ql | xargs tar -czvpf ~/mirrors/_isync_backups/$local_dir/bak_`date "+%Y-%m-%d_%H:%M:%S"`.tgz
+	mkdir -p ~/mirrors/$local_dir
+	cd ~/mirrors/$local_dir/ ; 
+	~/bin/generate_sftp-config-json.php $user $hostname $remote_dir $local_dir
+	rsync -$rsync_flags "$ssh_command" -n --progress --exclude=sftp-config.json --exclude=.git --delete $user@$hostname":"$remote_dir/. ~/mirrors/$local_dir/. | & egrep -v '^(receiving file list ...|$|sent [0-9]+ bytes  received [0-9]+ bytes|total size is [0-9]+  speedup is)' | perl -pe 's/(\x20\d+ files\.\.\.\x0d|\d+ files to consider\x0a)//g; s/^deleting //' | php -r 'while($_ = fgets(STDIN)){ $t = rtrim($_,"\n"); if ( file_exists($t) && ! is_dir($t) ) echo $_; }' | ~/bin/ql | xargs tar -czvpf ~/mirrors/_isync_backups/$local_dir/bak_`date "+%Y-%m-%d_%H:%M:%S"`.tgz
 	
 	echo " "
 	echo "=====  Syncing from Remote over local...  ====="
 	mkdir -p ~/mirrors/$local_dir
-	rsync -$rsync_flags --progress --exclude=sftp-config.json --delete $hostname":"$remote_dir/. ~/mirrors/$local_dir/.
+	rsync -$rsync_flags "$ssh_command" --progress --exclude=sftp-config.json --delete $user@$hostname":"$remote_dir/. ~/mirrors/$local_dir/.
 
 	echo " "
 	php -r 'foreach ( range($argv[1],1) as $x ) { echo "\rRefreshing in $x seconds...    "; sleep(1); }' 60

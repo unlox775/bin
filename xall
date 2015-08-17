@@ -1,0 +1,20 @@
+#!/usr/bin/php
+<?php
+
+$esc_args = array();
+array_shift($argv);
+foreach ( $argv as $a ) {
+    $esc_args[] = escapeshellarg(escapeshellarg($a));
+#    $esc_args[] = escapeshellarg($a);
+}
+
+foreach ( explode("\n",shell_exec('cat ~/codelinks/_server_list.txt')) as $s ) {
+    $s = trim($s);
+	if (empty($s)) { continue; }
+
+	echo "  \n$s\n";
+    passthru("ssh ". $_SERVER['USER'] ."@$s ". join(' ',$esc_args));
+}
+# foreach s (  ) 
+# echo "  "; echo $s;echo '----------------------------'; ssh $USER@$s $*;
+# end

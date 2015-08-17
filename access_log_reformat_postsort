@@ -1,0 +1,5 @@
+#!/usr/bin/php
+<?php
+while($os = fgets(STDIN)) {
+	echo preg_replace('/^.+?\Q|||---|||\E/','',$os);
+}
