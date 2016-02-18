@@ -1,0 +1,3 @@
+#!/bin/bash -norc
+
+git log --pretty=oneline $* | head -n50 

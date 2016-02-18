@@ -3,22 +3,62 @@
 set hostname=$1
 set remote_dir=$2
 set local_dir=$3
+
+set full_rsync_flags = 'azv'
 set rsync_flags = 'rlpDzv'
+set ssh_command = '-r'
+# set rsync_flags = 'azv'
+
+if ($#argv == 4) then
+	set user=$4
+else
+    set user=$USER
+endif
+
+if ($#argv == 5) then
+	set user=$4
+	set full_rsync_flags = 'azv -e '
+	set rsync_flags      = 'rlpDzv -e '
+	set ssh_command = 'ssh -p '$5
+else
+    set user=$USER
+endif
+
+# echo rsync -$rsync_flags "$ssh_command" 
+# # exit;
+# set echo = 1
+
+###  First Sync, do a FULL rsync, not size-only
+echo "=====  Initial FULL Rsync (slower, but avoids size-only omissions)...  ====="
+rsync -$full_rsync_flags "$ssh_command" --progress --exclude=sftp-config.json --exclude=.git --delete ~/mirrors/$local_dir/. $user@$hostname":"$remote_dir/. 
 
 while(1)
+	echo " "
+	php -r 'foreach ( range($argv[1],1) as $x ) { echo "\rRefreshing in $x seconds...    "; sleep(1); }' 20
 
 	clear;
 	php -r 'echo str_repeat("\n",rand(1,6));'
 
+	###  Warn People...
 	echo -n "\033[31\;40m"
 	echo "             --------->  DANGER\!\!\!  Don't leave this on for long\!  <---------            "
 	echo -n "\033[0m"                               # Reset colors to "normal."
 	
+
+
+
+
+
+	echo "=====  ACTIVE MIRROR ( --  UP ! -- )  ====="
+	echo "Remote Server: $user@$hostname":"$remote_dir"
+	echo "Local Source: ~/mirrors/$local_dir/."
+	
 	echo " "
 	echo "=====  Syncing from Local OVER Remote\!\!\!  ====="
 	echo "||| -" ~/mirrors/$local_dir/. '==>' $hostname":"$remote_dir/.
-	rsync -$rsync_flags --progress --exclude=sftp-config.json --exclude=.git --delete ~/mirrors/$local_dir/. $hostname":"$remote_dir/. 
+	rsync -$rsync_flags "$ssh_command" --progress --exclude=sftp-config.json --exclude=.git --delete ~/mirrors/$local_dir/. $user@$hostname":"$remote_dir/. 
 
-	echo " "
-	php -r 'foreach ( range($argv[1],1) as $x ) { echo "\rRefreshing in $x seconds...    "; sleep(1); }' 20
+	echo -n "\033[31\;40m"
+	echo "             --------->  DANGER\!\!\!  Don't leave this on for long\!  <---------            "
+	echo -n "\033[0m"                               # Reset colors to "normal."
 end

@@ -1,0 +1,12 @@
+#!/bin/bash -norc
+
+export STATUS_CLEAN=`gs | egrep -l 'nothing to commit..?.?working directory clean'`
+if [ "$STATUS_CLEAN" = "(standard input)" ]; then
+	echo "CONFIRMED SAFE : Local repo has no un-committed files (ok to do switch)"
+	git fetch 
+	git checkout $*
+	gu
+else
+	echo "BRANCH SWITCH ERROR : Local Mods!  Not allowed to switch until local mods are committed.  Showing Status..."
+	gs
+fi

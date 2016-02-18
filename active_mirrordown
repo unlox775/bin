@@ -4,6 +4,7 @@ set hostname=$1
 set remote_dir=$2
 set local_dir=$3
 
+set full_rsync_flags = 'azv'
 set rsync_flags = 'rlpDzv --size-only'
 set ssh_command = '-r'
 # set rsync_flags = 'azv'
@@ -16,7 +17,8 @@ endif
 
 if ($#argv == 5) then
 	set user=$4
-	set rsync_flags = 'rlpDzv --size-only -e '
+	set full_rsync_flags = 'azv -e '
+	set rsync_flags      = 'rlpDzv --size-only -e '
 	set ssh_command = 'ssh -p '$5
 else
     set user=$USER
@@ -26,10 +28,22 @@ endif
 # # exit;
 # set echo = 1
 
+###  First Sync, do a FULL rsync, not size-only
+echo "=====  Initial FULL Rsync (slower, but avoids size-only omissions)...  ====="
+rsync -$full_rsync_flags "$ssh_command" --progress --exclude=sftp-config.json --delete $user@$hostname":"$remote_dir/. ~/mirrors/$local_dir/.
+
 while(1)
+
+	echo " "
+	php -r 'foreach ( range($argv[1],1) as $x ) { echo "\rRefreshing in $x seconds...    "; sleep(1); }' 60
 
 	clear;
 	php -r 'echo str_repeat("\n",rand(1,8));'
+
+	echo "=====  ACTIVE MIRROR (Down)  ====="
+	echo "Remote Server: $user@$hostname":"$remote_dir"
+	echo "Local Destination: ~/mirrors/$local_dir/."
+	echo " "
 	
 	###  Backup which local files are about to be overwritten
 	echo "=====  Backing up about-to-be-overwritten files...  ====="
@@ -43,7 +57,4 @@ while(1)
 	echo "=====  Syncing from Remote over local...  ====="
 	mkdir -p ~/mirrors/$local_dir
 	rsync -$rsync_flags "$ssh_command" --progress --exclude=sftp-config.json --delete $user@$hostname":"$remote_dir/. ~/mirrors/$local_dir/.
-
-	echo " "
-	php -r 'foreach ( range($argv[1],1) as $x ) { echo "\rRefreshing in $x seconds...    "; sleep(1); }' 60
 end

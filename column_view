@@ -165,10 +165,22 @@ sub split_delim_line() {
   if ( $delim_quote_value ) {
     ###  The Quoted Delimeted method
     push(@field_values, $+) while $line =~ m{
-      $delim_quote_value([^$delim_quote_value\\]*(?:\\.[^$delim_quote_value\\]*)*)$delim_quote_value$delim_value?  ###  Groups the phrase inside the quotes
-        | ([^$delim_value]+)$delim_value?
-          | $delim_value
-          }gx;
+      $delim_quote_value
+      (
+      	[^$delim_quote_value\\]*
+      	(?:
+      	  $delim_quote_value$delim_quote_value
+      	  [^$delim_quote_value\\]*
+      	  |
+      	  \\.
+      	  [^$delim_quote_value\\]*
+      	  )*
+      	)
+      $delim_quote_value
+      $delim_value?  ###  Groups the phrase inside the quotes
+      | ([^$delim_value]+)$delim_value?
+      | $delim_value
+        }gx;
     push(@field_values, undef) if substr($line, -1, 1) eq $delim_value;
   }
 
