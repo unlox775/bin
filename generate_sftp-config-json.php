@@ -5,6 +5,8 @@ if ( file_exists('./sftp-config.json') ) { exit; }
 
 list($x,$user,$hostname,$remote_dir,$local_dir) = $argv;
 
+$remote_dir = preg_replace('/-\w{35}/','',$remote_dir);
+
 $contents = <<<EOT
 {
     // The tab key will cycle through the settings when first created

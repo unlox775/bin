@@ -1,0 +1,127 @@
+#!/usr/bin/perl
+
+$parent_pid = $$;
+
+my ($host,$remote_dir,$local_dir,$user,$port) = @ARGV;
+my $tunnel_local_port = 50333;
+my $tunnel_remote_port = 50783;
+
+$child_pid = fork();
+if ($child_pid == -1) {
+     die('could not fork');
+} elsif ($child_pid) {
+    # we are the parent
+
+	# print join(',','ssh -t -l '. $user .' -L '. "$tunnel_local_port:localhost:$tunnel_remote_port ". $host .' rsync --daemon --config=$HOME/.portahome/rsyncd.conf --no-detach --port=50783'); sleep 2;
+
+	$port_flag = "";
+	if ( $port ) { $port_flag = " -p $port"; }
+	exec('ssh -t -l '. $user . $port_flag .' -L '. "$tunnel_local_port:localhost:$tunnel_remote_port ". $host .' rsync --daemon --config=\$HOME/.portahome/rsyncd.conf --no-detach --port=50783');
+
+     # pcntl_wait($status); #Protect against Zombie children
+} else {
+    # we are the child
+
+    print "\n";
+    sleep 5;
+    $| = 1;
+
+    # system("tput init");
+    # system("tput smglr");
+    # system("tput smgtb");
+
+    foreach my $x ( reverse(1 .. 8) ) { print "\rStarting Rsync in $x seconds...    "; sleep(1); if ( kill(0, $parent_pid) != 1 ) { last; } }
+	if ( kill(0, $parent_pid) != 1 ) {
+		print "Tunnel died while we were waiting...\n\r";
+		exit;
+	}
+
+
+
+	my $full_rsync_flags = 'azv';
+	my $rsync_flags = 'rlpDzv --size-only';
+	my $ssh_command = '-r';
+	# set rsync_flags = 'azv';
+
+	if ( ! $user ) { $user = $ENV{USER}; }
+
+	# echo rsync -$rsync_flags "$ssh_command" 
+	# # exit;
+	# set echo = 1
+
+    print(`tput clear`);
+    # print(`tput smglr`);
+    # print(`tput smgtb`);
+
+
+	###  First Sync, do a FULL rsync, not size-only
+	print "=====  Initial FULL Rsync (slower, but avoids size-only omissions)...  =====\n\r";
+	`mkdir -p ~/mirrors/$local_dir`;
+	`cd ~/mirrors/$local_dir/; ~/bin/generate_sftp-config-json.php $user $host $remote_dir $local_dir`;
+	# print "rsync -$full_rsync_flags ".$ssh_command." --progress --exclude=sftp-config.json --delete rsync://localhost:$tunnel_local_port/$remote_dir/. ~/mirrors/$local_dir/.\n\n\r";
+	system("rsync -$full_rsync_flags ".$ssh_command." --progress --exclude=sftp-config.json --delete rsync://localhost:$tunnel_local_port/$remote_dir/. ~/mirrors/$local_dir/.");
+
+	while(1) {
+		print "\n\r";
+		foreach my $x ( reverse(1 .. 60) ) { print "\rRefreshing in $x seconds...    "; sleep(1); if ( kill(0, $parent_pid) != 1 ) { last; } }
+
+		if ( kill(0, $parent_pid) != 1 ) { print "Tunnel has shut down: exit\n\n\r"; exit; }
+
+
+		print(`tput clear`);
+		# print "\033[2J";    #clear the screen
+		# print "\033[0;0H"; #jump to 0,0
+		print "\n\r" x int(rand(8));
+
+		print "=====  ACTIVE MIRROR (Down)  =====\n\r";
+		print "Remote Server: $user\@$host:$remote_dir\n\r";
+		print "Local Destination: ~/mirrors/$local_dir/.\n\r";
+		print " \n\r";
+		
+		###  Backup which local files are about to be overwritten
+		print "=====  Backing up about-to-be-overwritten files...  =====\n\r";
+		$date = `date "+%Y-%m-%d_%H:%M:%S"`; chomp($date);
+		`mkdir -p ~/mirrors/_isync_backups/$local_dir`;
+		# print("rsync -$rsync_flags ".$ssh_command." -n --progress --exclude=sftp-config.json --exclude=.git --delete rsync://localhost:$tunnel_local_port/$remote_dir/. ~/mirrors/$local_dir/. 2>&1 | egrep -v '^(receiving file list ...|$|sent [0-9]+ bytes  received [0-9]+ bytes|total size is [0-9]+  speedup is)' | perl -pe 's/(\\x20\\d+ files\\.\\.\\.\\x0d|\\d+ files to consider\\x0a)//g; s/^deleting //' | php -r 'while($_ = fgets(STDIN)){ $t = rtrim($_,\"\\n\"); if ( file_exists($t) && ! is_dir($t) ) echo $_; }' | ~/bin/ql | xargs tar -czvpf ~/mirrors/_isync_backups/$local_dir/bak_$date.tgz\n\n\r");
+		system("rsync -$rsync_flags ".$ssh_command." -n --progress --exclude=sftp-config.json --exclude=.git --delete rsync://localhost:$tunnel_local_port/$remote_dir/. ~/mirrors/$local_dir/. 2>&1 | egrep -v '^(receiving file list ...|$|sent [0-9]+ bytes  received [0-9]+ bytes|total size is [0-9]+  speedup is)' | perl -pe 's/(\\x20\\d+ files\\.\\.\\.\\x0d|\\d+ files to consider\\x0a)//g; s/^deleting //' | php -r 'while(\$_ = fgets(STDIN)){ \$t = rtrim(\$_,\"\\n\"); if ( file_exists(\$t) && ! is_dir(\$t) ) echo \$_; }' | ~/bin/ql | xargs tar -czvpf ~/mirrors/_isync_backups/$local_dir/bak_$date.tgz");
+
+		if ( kill(0, $parent_pid) != 1 ) { print "Tunnel has shut down: exit\n\n\r"; exit; }
+
+		print " \n\r";
+		print "=====  Syncing from Remote over local...  =====\n\r";
+		system("rsync -$rsync_flags ".$ssh_command." --progress --exclude=sftp-config.json --delete rsync://localhost:$tunnel_local_port/$remote_dir/. ~/mirrors/$local_dir/.");
+
+		if ( kill(0, $parent_pid) != 1 ) { print "Tunnel has shut down: exit\n\n\r"; exit; }
+	}
+
+
+
+
+
+
+
+
+
+	# foreach $i ((1..6) ) {
+	# 	$x = kill 0, $parent_pid;
+		
+	# 	if ( $x != 1 ) {
+	# 		print "Tunnel has shut down: exit\n\n";
+	# 		# while(<>) {
+	# 		# 	print($_);
+	# 		# }
+	# 		exit;
+	# 	}
+	# 	else {
+	# 		print "KILL = $x\t\t";
+	# 	}
+
+	# 	print "CHILD: $i\n";
+	# 	sleep 1;
+	# }
+
+	# print "Planned Death:\n\n";
+	# # while(<>) {
+	# # 	print($_);
+	# # }
+}

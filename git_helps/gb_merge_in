@@ -1,0 +1,12 @@
+#!/bin/bash -norc
+
+export STATUS_CLEAN=`gs | egrep -l 'nothing to commit..?.?working directory clean'`
+if [ "$STATUS_CLEAN" = "(standard input)" ]; then
+	echo "CONFIRMED SAFE : Local repo has no un-committed files (ok to do switch)"
+	git fetch origin $1:$1
+	git merge -Xignore-all-space origin/$*
+else
+	echo "BRANCH MERGE ERROR : Local Mods!  Not allowed to merge until local mods are committed.  Showing Status..."
+	gs
+fi
+
