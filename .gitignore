@@ -34,3 +34,11 @@ xwindows/CVS
 .cvsignore
 my_perl_libs/.cvsignore
 noshare
+angular2_dev_env_config_polaris
+code
+dev-server
+ecr-login
+ng
+node
+nodejs_dev_env_config_polaris
+npm
