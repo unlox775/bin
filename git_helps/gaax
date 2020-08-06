@@ -1,0 +1,7 @@
+#!/bin/tcsh -f
+
+mix format && mix credo --strict && mix test && ga -A
+
+###  This only works for g it untracked files
+#ga `git status | & perl -e '$ut = 0; while(<>) { $ut=0 if /^# [^ ].+:/; $ut=4 if /^# Untracked files:/; next if($ut == 0); if($ut>1){$ut--;next;}  unless(s/^#\s*(\S)/ $1/ && s/\n$//s){ $ut = 0; next;} print $_;}'`
+ 

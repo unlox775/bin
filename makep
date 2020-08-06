@@ -24,9 +24,9 @@ my $projects_directory = "$ENV{HOME}/work/projects";
 
 ###  Default symlinks
 my %default_symlinks = ( 
-                         'links/p1' => "$ENV{HOME}/tsanet/sites/community.tsanet.org",
-                         'links/p2' => "$ENV{HOME}/tsanet/lib/ctl/secure",
-                         'links/p3' => "$ENV{HOME}/tsanet/sites/community.tsanet.org",
+#                         'links/p1' => "$ENV{HOME}/tsanet/sites/community.tsanet.org",
+#                         'links/p2' => "$ENV{HOME}/tsanet/lib/ctl/secure",
+#                         'links/p3' => "$ENV{HOME}/tsanet/sites/community.tsanet.org",
 #                         'links/p4' => "$ENV{HOME}/tsanet/",
 #                         'links/p5' => "$ENV{HOME}/tsanet/",
 #                         'links/p6' => "$ENV{HOME}/tsanet/",
