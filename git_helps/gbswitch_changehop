@@ -1,0 +1,22 @@
+#!/bin/bash -norc
+
+mkdir -p ~/work/backup
+curdir=${PWD##*/}
+
+echo Backing up changes to ~/work/backup/$curdir\_changehop_`date +"%Y-%m-%d_%H.%M.tgz"` ...
+tar -czvpf ~/work/backup/$curdir\_changehop_`date +"%Y-%m-%d_%H.%M.tgz"` `gmodq`
+gaa
+git diff -w --cached origin/`gcb` > ~/$curdir\_changehop.patch
+git restore --staged `gmodq`
+
+echo Reverting changes...
+git reset --hard
+rm -Rf `gmodq`
+
+echo Switching Branches...
+gbswitch $*
+
+echo Re-applying changes, using patch...
+patch -p1 < ~/$curdir\_changehop.patch
+
+gs

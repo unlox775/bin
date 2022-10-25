@@ -1,0 +1,3 @@
+#!/bin/bash -norc
+
+git status | egrep "^\t" | perl -pe 's/^\t([a-z ]+:\s+)?//'

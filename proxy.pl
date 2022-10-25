@@ -143,6 +143,56 @@ The proxy server broke from being used to much.
     print LOG "\n-------------------------->[$LOGCOUNT]\n$HEAD";
     close LOG;
     print((scalar localtime)," [$LOGCOUNT] Connection complete to [$remoteaddr:$remoteport]...\n");
+  } elsif ($REQUEST=~s%^(\w+) https://([\w\-\.]+)%$1 %i) {
+    $remotehost=$2;
+    $remoteport=443;
+    if ($REQUEST=~s%^(\w+ ):(\d+)%$1%i) {
+      $remoteport=$2;
+    }
+    $REQUEST=~s%^(.*) HTTP/[\d\.]+%$1 HTTP/1.0%;
+    print((scalar localtime)," [$LOGCOUNT] Resolving [$remotehost]...\n");
+    my $remoteaddr=(gethostbyname $remotehost)[4]
+      || error($client,"DNS ERROR: Cannot resolve ($remotehost)");
+    $remoteaddr=join(".",(unpack("C4",$remoteaddr)));
+    print((scalar localtime)," [$LOGCOUNT] Connecting to [$remoteaddr:$remoteport]...\n");
+    $remote = IO::Socket::INET->new
+      (Proto    => "tcp",
+       PeerAddr => $remoteaddr,
+       PeerPort => $remoteport)
+        || error($client,"Cannot connect to port ($remoteport) on ($remotehost&nbsp;->&nbsp;$remoteaddr) <nobr>$!</nobr>");
+    print((scalar localtime)," [$LOGCOUNT] Sending request for [$1]\n");
+    $remote->autoflush(1);
+    print $remote $REQUEST;
+    print "=================Should be printing to ". $ENV{HOME} ."/PROXY.LOG=======================\n\n";
+    open (LOG,">>". $ENV{HOME} ."/PROXY.LOG");
+    print LOG "\n<--------------------------[$LOGCOUNT]\n$REQUEST";
+    close LOG;
+    $RESULT="";
+    while (1) {
+      $append=<$remote>;
+      $RESULT.=$append;
+      last if length $append<3;
+    }
+    $HEAD=$RESULT;
+    if ($RESULT=~/^Content-length: (\d+)/im) {
+      $bytes=$1;
+      $CONTENT="";
+      print "CONTENTLENGTH FOUND! READING [$bytes] bytes...\n";
+      read($remote,$CONTENT,$bytes);
+      $RESULT.=$CONTENT;
+    } else {
+      print "CONTENTLENGTH MISSING! Reading everything...\n";
+      while (<$remote>)
+      {$RESULT.=$_;}
+    }
+    close $remote;
+    print $client $RESULT;
+    close $client;
+    print "=================Should be printing to ". $ENV{HOME} ."/PROXY.LOG=======================\n\n";
+    open (LOG,">>". $ENV{HOME} ."/PROXY.LOG");
+    print LOG "\n-------------------------->[$LOGCOUNT]\n$HEAD";
+    close LOG;
+    print((scalar localtime)," [$LOGCOUNT] Connection complete to [$remoteaddr:$remoteport]...\n");
   } elsif ($REQUEST=~m%^GET ftp://([\w\-\.]+)%i) {
     $remotehost=$1;
     $remoteport=21;

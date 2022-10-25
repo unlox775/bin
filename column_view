@@ -67,6 +67,11 @@ while ( <> ) {
 exit unless @data || @{ $data[0] };
 
 
+###  Get the Max number of columns
+my @lengths = sort { $b <=> $a } map { $#{$_} } @data;
+my $max_cols = $lengths[0] || 0;
+
+
 ###  Assemble the list of Maximum Column Widths
 my @max_col_widths = ( 
                        ###  Assemble the list of Maximum Column Widths
@@ -77,7 +82,7 @@ my @max_col_widths = (
                          }
 
                          $maxlength;
-                       } 0 .. $#{ $data[0] }
+                       } 0 .. $max_cols
                        );
 
 
@@ -97,7 +102,7 @@ my $format = (
                      ',',
                      map {
                        "\$row[$_]";
-                     } 0 .. $#{ $data[0] }
+                     } 0 .. $max_cols
                      ) .
                "\n.\n"
                );

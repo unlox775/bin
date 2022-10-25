@@ -1,0 +1,134 @@
+#!/usr/bin/ruby
+# Filename:	rbenvWrap
+# Author:	David Ljung Madison <DaveSource.com>
+# License:	Creative Commons Attribution 4.0 International (CC BY 4.0)
+#           http://creativecommons.org/licenses/by/4.0/
+# Description:	Wrapper to rbenv for csh/tcsh integration
+# Requirements:
+#   Clean install of 'rbenv'
+#   $SHELL variable set to tcsh/csh/etc...
+#
+# Installing rbenv (general)
+# ----------------
+# % cd
+# % git clone git://github.com/sstephenson/rbenv.git .rbenv
+# % git clone git://github.com/sstephenson/ruby-build.git ~/.rbenv/plugins/ruby-build
+#
+# Prepare profile (for rbenv with tcsh):
+# ---------------
+# % echo "eval `rbenvWrap init -`" >> ~/.tcshrc
+# % source ~/.tcshrc
+#
+# For csh use '.cshrc' instead of '.tcshrc'
+# If you use csh and get errors about "complete: command not found" then
+# change the 'eval' string in your .cshrc to:  (add 'csh' to the end)
+#   eval `rbenvWrap init - csh`
+
+##################################################
+# Wrapper
+##################################################
+PROGNAME = File.basename($0)
+FULLBASE = File.expand_path(File.dirname($0))
+ORIGPROG = PROGNAME.sub(/Wrap/i,'')
+
+require 'shellwords'
+
+def fatal(*msg)
+	msg.each { |m| $stderr.puts "[#{ORIGPROG} wrapper] ERROR: #{m}" }
+	exit(-1);
+end
+
+# Find actual program we are wrapping
+$WRAPPED = nil
+fatal("No $PATH variable?") unless ENV['PATH']
+fullThis = File.expand_path($0)
+ENV['PATH'].split(':').each { |p|
+	path = File.expand_path(p+'/'+ORIGPROG)
+	next if path==fullThis
+	next unless File.exists? path
+	$WRAPPED = path
+	break
+}
+# Default installation (which *we* will put in the path)
+$WRAPPED=ENV['HOME']+'/.rbenv/bin/rbenv' unless $WRAPPED && File.exists?($WRAPPED)
+$WRAPPED='.rbenv/bin/rbenv' unless $WRAPPED && File.exists?($WRAPPED)
+fatal("Couldn't find installed '#{ORIGPROG}' executable") unless $WRAPPED && File.exists?($WRAPPED)
+
+# If this isn't csh/tcsh, don't use this wrapper (how did we get here??)
+unless ENV['SHELL'] && ENV['SHELL'].match(/csh/)
+	$stderr.puts "[#{ORIGPROG} wrapper] Warning: Called from non-csh?  (See \$SHELL)"
+	exec($WRAPPED,*ARGV)
+end
+
+#$stderr.puts "[csh #{ORIGPROG} wrapper] #{ARGV}"
+
+# Convert some bash commands we might see from rbenv scripts to csh syntax
+# Current script output we need to convert:
+#   rbenv: libexec/rbenv-sh-rehash
+#   rbenv: libexec/rbenv-sh-shell
+# There's also: 'rbenv-rehash --complete' but it doesn't look like this has eval output
+def convertCsh(str)
+	str = str.dup
+	str.chomp!
+
+	# environment variable settings
+	str.sub!(/^unset/,'unsetenv')
+	str.sub!(/^export (\S+)=/,'setenv \1 ')
+	# We are seeing:
+	#   RBENV_VERSION_OLD="$RBENV_VERSION"
+	#   But initially $RBENV_VERSION might not be set
+	str.sub!(/^(\S+)="?\$(.+?)"?$/) {
+		new,old = $1,$2
+		"setenv #{new} '#{ENV[old]}'"
+	}
+	str.sub!(/^(\S+=.*)/,'set \1')
+
+	# rehash (why do we even need this??)
+	str.sub!(/^hash -r/,'rehash')
+
+	# function return
+	str.sub!(/return\s+\d+/,'test -n ""')
+
+	str
+end
+
+##################################################
+# Main code
+##################################################
+def main
+	args = ARGV.map { |s| Shellwords.escape(s) }
+
+	# Command is ARGV[0]
+	# Special eval handling for:  init/rehash/shell
+	if ARGV[0]=='init'
+		if ARGV[1]=='-'
+			puts "setenv PATH ~/.rbenv/shims:\${PATH} ;"
+			puts "alias #{ORIGPROG} 'eval `\\#{PROGNAME} \\!*`' ;"
+			exit if ARGV[2] && ARGV[2]=='csh'
+
+			# Completions (tcsh-only)
+			commands = `#{$WRAPPED} commands`.split(/\n/)
+			completions = ["'p/1/(#{commands.join(' ')})/'"]
+			commands.each { |cmd|
+				comp = `#{$WRAPPED} completions #{cmd}`.split(/\n/)
+				next if comp.empty?
+				completions.push("'n/#{cmd}/(#{comp.join(' ')})/'")
+			}
+			puts "complete rbenv #{completions.join(' ')} ;"
+			exit
+		else
+			$stderr.print "# Load rbenv automatically by adding to your ~/.cshrc or ~/.tcshrc:\n\n"
+			$stderr.print "eval `#{PROGNAME} init -`\n\n"
+			exit
+		end
+	elsif ARGV[0]=='rehash' || ARGV[0]=='shell'
+		IO.popen("#{$WRAPPED} sh-#{args.join(' ')}").each { |l|
+			puts convertCsh(l)+';'
+		}
+		exit
+	else
+		#$stderr.puts "#{$WRAPPED} #{args.join(' ')}"
+		puts "#{$WRAPPED} #{args.join(' ')}"
+	end
+end
+main

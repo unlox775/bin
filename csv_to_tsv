@@ -1,0 +1,7 @@
+#!/opt/homebrew/bin/php
+<?php
+$stdin = fopen("php://stdin", "r");
+
+while ( ($l = fgetcsv($stdin) ) !== FALSE ) {
+  echo join("\t",$l)."\n";
+}

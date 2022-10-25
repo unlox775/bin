@@ -1,0 +1,44 @@
+#! /usr/bin/env bash -x
+
+set -euo pipefail
+
+pkg=$1
+version=$2
+
+pushd "$(brew --prefix)/bin"
+
+#brew unlink "$pkg"
+(
+  if [ -d "../Cellar/$pkg@$version/$version/bin" ]
+  then
+    pushd "$(brew --prefix)/bin"
+    rm -f "$pkg"
+    ln -s "../Cellar/$pkg@$version/$version/bin/$pkg"`echo $version | perl -pe 's/\D//g'` "$pkg"
+
+    pushd "$(brew --prefix)/share"
+    rm -f "$pkg"
+    ln -s "../Cellar/$pkg@$version/$version/share/$pkg"
+
+    pushd "$(brew --prefix)/opt"
+    rm -f "$pkg"
+    ln -s "../Cellar/$pkg/$version" "$pkg"
+  elif [ -d "../Cellar/$pkg/$version/bin" ]
+  then 
+    pushd "$(brew --prefix)/bin"
+    rm -f "$pkg"
+    ln -s "../Cellar/$pkg/$version/bin/$pkg" "$pkg"
+
+    pushd "$(brew --prefix)/share"
+    rm -f "$pkg"
+    ln -s "../Cellar/$pkg/$version/share/$pkg" "$pkg"
+
+    pushd "$(brew --prefix)/opt"
+    rm -f "$pkg"
+    ln -s "../Cellar/$pkg/$version" "$pkg"
+  else
+    echo "Version $version does not appear to be installed"
+    exit
+  fi
+
+)
+#brew link "$pkg"
