@@ -1,0 +1,50 @@
+#!/usr/bin/env python3
+
+import csv
+import json
+import sys
+
+# Function to get a list of distinct keys from a list of objects
+def get_distinct_keys(objects):
+    keys = set()
+    for obj in objects:
+        keys.update(obj.keys())
+    return sorted(keys)
+
+# Read in JSON files from command line arguments
+files = sys.argv[1:]
+if len(files) == 0:
+    print("No input files specified.")
+    sys.exit(1)
+
+# Read in all objects from all files and get distinct keys
+objects = []
+for file in files:
+    if file == '-':
+        # Read from standard input
+        file_objects = json.load(sys.stdin)
+    else:
+        with open(file, 'r') as f:
+            file_objects = json.load(f)
+
+    # skip files if not JSON format
+    if file_objects is None:
+        continue
+    
+    # skip file if not a list of objects
+    if not isinstance(file_objects, list):
+        continue
+
+    # Add a key to each object: 'file' with the name of the file
+    for obj in file_objects:
+        # without path name, or extension
+        obj['file'] = file.split('/')[-1].split('.')[0]
+
+    objects += file_objects
+keys = get_distinct_keys(objects)
+
+# Write CSV file with distinct keys as columns
+writer = csv.DictWriter(sys.stdout, fieldnames=keys)
+writer.writeheader()
+for obj in objects:
+    writer.writerow(obj)

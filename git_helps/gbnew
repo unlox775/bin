@@ -1,5 +1,5 @@
 #!/bin/bash -norc
 
 git checkout -b $*
-git branch
+git branch | cat -
 gp

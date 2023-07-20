@@ -1,0 +1,13 @@
+#!/bin/zsh
+
+# use the first argument as the directory to search, or use the current directory if no argument was provided
+directory_path="${1:-.}"
+
+# iterate over each .tgz file in the directory and its subdirectories
+for tarball in $(find $directory_path -type f -name "*.tgz"); do
+    echo "Generating manifest for $tarball ..."
+    # create the .manifest.txt file name
+    manifest="${tarball}.manifest.txt"
+    # use tar to list the contents of the tarball and save it to the manifest file
+    tar -tzf $tarball > $manifest
+done

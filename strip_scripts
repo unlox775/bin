@@ -1,0 +1,31 @@
+#!/usr/bin/env python3
+
+import sys
+from bs4 import BeautifulSoup
+
+def strip_scripts(html_content):
+    soup = BeautifulSoup(html_content, 'html.parser')
+
+    for script_tag in soup.find_all('script'):
+        script_tag.decompose()
+
+    return str(soup)
+
+def main():
+    if len(sys.argv) != 2:
+        print("Usage: python strip_scripts.py <input_file> or - (for stdin)")
+        sys.exit(1)
+
+    input_file = sys.argv[1]
+
+    if input_file == '-':
+        html_content = sys.stdin.read()
+    else:
+        with open(input_file, 'r', encoding='utf-8') as f:
+            html_content = f.read()
+
+    modified_html = strip_scripts(html_content)
+    sys.stdout.write(modified_html)
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,35 @@
+#!/bin/zsh
+
+# use the first argument as the directory to search, or use the current directory if no argument was provided
+directory_path="${1:-.}"
+
+# function to generate manifest for tar.gz/tgz, zip and 7z files
+generate_manifest() {
+    file=$1
+    case $file in
+        *.tar.gz|*.tgz)
+			echo "Creating Manifest for $file ..."
+            tar -tzf $file > "${file}.manifest.txt"
+            ;;
+        *.zip)
+			echo "Creating Manifest for $file ..."
+            unzip -l $file > "${file}.manifest.txt"
+            ;;
+        *.7z)
+			echo "Creating Manifest for $file ..."
+            7z l $file > "${file}.manifest.txt"
+            ;;
+    esac
+}
+
+# check if --files switch is passed
+if [ "$directory_path" = "--files" ]; then
+    while IFS= read -r line; do
+        generate_manifest "$line"
+    done < "$2"
+else
+    # iterate over each .tgz, .tar.gz, .zip, .7z file in the directory and its subdirectories
+    for file in $(find $directory_path -type f \( -name "*.tgz" -o -name "*.tar.gz" -o -name "*.zip" -o -name "*.7z" \)); do
+        generate_manifest "$file"
+    done
+fi

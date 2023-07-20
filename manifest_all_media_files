@@ -1,0 +1,21 @@
+#!/bin/zsh
+
+# define the output file
+output_file="manifest.csv"
+
+# initialize the output file with headers
+echo "Full Path,File Name,Date" > $output_file
+
+# function to generate manifest for png, jpg, mp4, mov and avi files
+generate_manifest() {
+    file=$1
+    # extract the date from the metadata of the file
+    date=$(exiftool -DateTimeOriginal -d "%Y:%m:%d %H:%M:%S" -S -s $file)
+    # output the data to the CSV file
+    echo "$file,$(basename $file),$date" >> $output_file
+}
+
+# iterate over each .png, .jpg, .mp4, .mov, .avi file in the directory and its subdirectories
+for file in $(find . -type f \( -name "*.png" -o -name "*.jpg" -o -name "*.mp4" -o -name "*.mov" -o -name "*.avi" \)); do
+    generate_manifest "$file"
+done

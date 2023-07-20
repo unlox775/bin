@@ -1,0 +1,16 @@
+#!/bin/bash
+
+# Get the number of active displays
+num_displays=$(system_profiler SPDisplaysDataType | grep -c "Resolution:")
+
+# Show or hide the dock depending on the number of displays
+if [ $num_displays -gt 1 ]; then
+  # Show dock
+  defaults write com.apple.dock autohide -bool false
+else
+  # Hide dock
+  defaults write com.apple.dock autohide -bool true
+fi
+
+# Restart the Dock to apply changes
+killall Dock
