@@ -6,19 +6,30 @@ directory_path="${1:-.}"
 # function to generate manifest for tar.gz/tgz, zip and 7z files
 generate_manifest() {
     file=$1
-    case $file in
+    manifest_file="${file}.manifest.txt"
+
+    # Skip if manifest already exists
+    if [ -f "$manifest_file" ]; then
+        echo "     --> Manifest already exists: $manifest_file"
+        return
+    fi
+
+    case "$file" in
         *.tar.gz|*.tgz)
 			echo "Creating Manifest for $file ..."
-            tar -tzf $file > "${file}.manifest.txt"
+            tar -tzf "$file" > "$manifest_file"
             ;;
         *.zip)
 			echo "Creating Manifest for $file ..."
-            unzip -l $file > "${file}.manifest.txt"
+            unzip -l -P '' "$file" > "$manifest_file"
             ;;
         *.7z)
 			echo "Creating Manifest for $file ..."
-            7z l $file > "${file}.manifest.txt"
+            7z l '-p{}' "$file" > "$manifest_file"
             ;;
+        *)
+            echo -n "."
+            ;;        
     esac
 }
 
@@ -29,7 +40,7 @@ if [ "$directory_path" = "--files" ]; then
     done < "$2"
 else
     # iterate over each .tgz, .tar.gz, .zip, .7z file in the directory and its subdirectories
-    for file in $(find $directory_path -type f \( -name "*.tgz" -o -name "*.tar.gz" -o -name "*.zip" -o -name "*.7z" \)); do
+    for file in $(find "$directory_path" -type f \( -name "*.tgz" -o -name "*.tar.gz" -o -name "*.zip" -o -name "*.7z" \)); do
         generate_manifest "$file"
     done
 fi

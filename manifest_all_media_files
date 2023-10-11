@@ -1,7 +1,10 @@
 #!/bin/zsh
 
+directory_path="${1:-.}"
+
 # define the output file
-output_file="manifest.csv"
+date=$(date +"%Y-%m-%d")
+output_file="manifest-${date}.csv"
 
 # initialize the output file with headers
 echo "Full Path,File Name,Date" > $output_file
@@ -9,13 +12,50 @@ echo "Full Path,File Name,Date" > $output_file
 # function to generate manifest for png, jpg, mp4, mov and avi files
 generate_manifest() {
     file=$1
+    echo "Reading creation date of file: $file"
+
     # extract the date from the metadata of the file
-    date=$(exiftool -DateTimeOriginal -d "%Y:%m:%d %H:%M:%S" -S -s $file)
+    date=$(exiftool -DateTimeOriginal -d "%Y:%m:%d %H:%M:%S" -S -s "$file")
+
+    # if date is not found in metadata, use file's creation date as fallback
+    if [ -z "$date" ]
+    then
+        echo "    --> Falling back to Create Date of file ..."
+        date=$(stat -f "%SB" -t "%Y:%m:%d %H:%M:%S" "$file")
+    fi
+
+    # if creation date is not available, use file's modification date as fallback
+    if [ -z "$date" ]
+    then
+        echo "    --> Falling back to Modified Date of file ..."
+        date=$(stat -f "%Sm" -t "%Y:%m:%d %H:%M:%S" "$file")
+    fi
+
     # output the data to the CSV file
     echo "$file,$(basename $file),$date" >> $output_file
 }
 
-# iterate over each .png, .jpg, .mp4, .mov, .avi file in the directory and its subdirectories
-for file in $(find . -type f \( -name "*.png" -o -name "*.jpg" -o -name "*.mp4" -o -name "*.mov" -o -name "*.avi" \)); do
-    generate_manifest "$file"
-done
+# check if --files switch is passed
+if [ "$directory_path" = "--files" ]; then
+    while IFS= read -r line; do
+        generate_manifest "$line"
+    done < <(egrep -i '(jpg|png|mov|mp4|avi|tif)$' "$2")
+else
+    # iterate over each .tgz, .tar.gz, .zip, .7z file in the directory and its subdirectories
+    while IFS= read -r -d '' file; do
+        generate_manifest "$file"
+    done < <(find "$directory_path" -type f \( \
+        -name "*.png" -o \
+        -name "*.jpg" -o \
+        -name "*.mp4" -o \
+        -name "*.mov" -o \
+        -name "*.avi" -o \
+        -name "*.tif" -o \
+        -name "*.PNG" -o \
+        -name "*.JPG" -o \
+        -name "*.MP4" -o \
+        -name "*.MOV" -o \
+        -name "*.AVI" -o \
+        -name "*.TIF" \
+        \) -print0)
+fi

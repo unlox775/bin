@@ -1,0 +1,21 @@
+#!/usr/bin/env elixir
+
+# Fetch clipboard content
+{data, 0} = System.cmd("pbpaste", [])
+
+# Trim the fetched data
+data = String.trim(data)
+
+# Evaluate the read data to convert string representation back to an Elixir term
+term = Code.eval_string(data) |> elem(0)
+
+# Format it pretty
+formatted_data = inspect(term, pretty: true, limit: :infinity)
+
+# Write to a file
+File.write!("/tmp/format.ex", formatted_data)
+
+# Open in Visual Studio Code
+System.cmd("code", ["/tmp/format.ex"])
+
+IO.puts("Formatted data written to /tmp/format.ex and opened in Visual Studio Code.")

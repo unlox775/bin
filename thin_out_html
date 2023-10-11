@@ -1,0 +1,40 @@
+#!/usr/bin/env python3
+
+from bs4 import BeautifulSoup, Comment, Tag
+import sys
+
+def thin_out_html(html_content):
+    soup = BeautifulSoup(html_content, 'html.parser')
+
+    # Remove comments
+    for comment in soup.find_all(string=lambda text: isinstance(text, Comment)):
+        comment.extract()
+
+    # Remove head tag, stylesheets, and JS content
+    for tag in soup.find_all(['head', 'script', 'style', 'noscript']):
+        tag.decompose()
+
+
+    # Remove unnecessary nested divs
+    while True:
+        divs = soup.find_all('div', recursive=False)
+        changed = False
+        for div in divs:
+            if len(div.contents) == 1 and isinstance(div.contents[0], Tag) and div.contents[0].name == 'div':
+                div.unwrap()
+                changed = True
+        if not changed:
+            break
+
+    # Keep only necessary attributes
+    non_purged_attrs = {'value', 'class', 'id', 'href'}
+    for tag in soup.find_all(True):
+        tag.attrs = {key: value for key, value in tag.attrs.items() if key in non_purged_attrs}
+
+    return str(soup)
+
+if __name__ == "__main__":
+    html_content = sys.stdin.read()
+    cleaned_html = thin_out_html(html_content)
+    print(cleaned_html)
+
