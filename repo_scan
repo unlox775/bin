@@ -1,0 +1,34 @@
+#!/bin/bash
+
+for dir in */ ; do
+  if [ -d "$dir/.git" ]; then
+    cd "$dir"
+    
+    # Identify the default branch (e.g., master or main)
+    default_branch=$(git remote show origin | grep 'HEAD branch' | cut -d: -f2 | tr -d ' ')
+    
+    # Check for untracked or modified files
+    local_changes=$(git status --porcelain | wc -l)
+    first_files=$(git status --porcelain | awk '{print $2}' | head -3)
+    
+    # Check for commits not pushed to the remote
+    git fetch > /dev/null 2>&1
+    commits_behind=$(git log --oneline origin/$default_branch..HEAD | wc -l)
+    
+    # Reporting
+    echo "Checking repo: $dir"
+    if [ "$local_changes" -gt 0 ]; then
+      echo "  Local changes detected:"
+      for file in $first_files; do
+        echo "    $file"
+      done
+      [ "$local_changes" -gt 3 ] && echo "    ... and $(($local_changes - 3)) more files"
+    fi
+
+    if [ "$commits_behind" -gt 0 ]; then
+      echo "  Commits not pushed to remote: $commits_behind"
+    fi
+
+    cd ..
+  fi
+done
