@@ -1,0 +1,18 @@
+#!/usr/bin/env elixir
+
+defmodule ErlBinaryViewer do
+  def run(filename) when is_binary(filename) do
+    filename
+    |> File.read!()
+    |> :erlang.binary_to_term()
+    |> IO.inspect(limit: :infinity, pretty: true, printable_limit: :infinity, width: 80, charlists: :as_lists)
+  end
+end
+
+case System.argv() do
+  [filename] -> 
+    ErlBinaryViewer.run(filename)
+  _ -> 
+    IO.puts("Usage: view_erl_binary <filename.erlb>")
+    System.halt(1)
+end

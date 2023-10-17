@@ -1,0 +1,53 @@
+#!/bin/bash
+
+SECURITY_GROUP_IDS=$(aws ec2 describe-security-groups --query 'SecurityGroups[*].GroupId' --output text)
+
+for SG_ID in $SECURITY_GROUP_IDS; do
+    echo "Security Group ID: $SG_ID"
+    
+    # Inbound Rules
+    echo "Inbound Rules:"
+    IP_PERMISSIONS=$(aws ec2 describe-security-groups --group-ids $SG_ID --query 'SecurityGroups[*].IpPermissions[]' --output text)
+    while IFS=$'\n' read -r LINE; do
+        if [[ $LINE =~ ^-1 ]]; then
+            PROTOCOL="ALL"
+            FROM_PORT="ALL"
+            TO_PORT="ALL"
+        elif [[ $LINE =~ ^[0-9] ]]; then
+            FROM_PORT=$(echo "$LINE" | awk '{print $1}')
+            PROTOCOL=$(echo "$LINE" | awk '{print $2}')
+            TO_PORT=$(echo "$LINE" | awk '{print $3}')
+        else
+            if [[ $LINE =~ ^USERIDGROUPPAIRS ]]; then
+                echo "Protocol: $PROTOCOL | From Port: $FROM_PORT | To Port: $TO_PORT"
+            else
+                CIDR_OR_SG=$(echo "$LINE" | awk '{print $2}')
+                echo "Protocol: $PROTOCOL | From Port: $FROM_PORT | To Port: $TO_PORT | CIDR/SG: $CIDR_OR_SG"
+            fi
+        fi
+    done <<< "$IP_PERMISSIONS"
+    
+    # Outbound Rules
+    echo "Outbound Rules:"
+    IP_PERMISSIONS_EGRESS=$(aws ec2 describe-security-groups --group-ids $SG_ID --query 'SecurityGroups[*].IpPermissionsEgress[]' --output text)
+    while IFS=$'\n' read -r LINE; do
+        if [[ $LINE =~ ^-1 ]]; then
+            PROTOCOL="ALL"
+            FROM_PORT="ALL"
+            TO_PORT="ALL"
+        elif [[ $LINE =~ ^[0-9] ]]; then
+            FROM_PORT=$(echo "$LINE" | awk '{print $1}')
+            PROTOCOL=$(echo "$LINE" | awk '{print $2}')
+            TO_PORT=$(echo "$LINE" | awk '{print $3}')
+        else
+            if [[ $LINE =~ ^USERIDGROUPPAIRS ]]; then
+                echo "Protocol: $PROTOCOL | From Port: $FROM_PORT | To Port: $TO_PORT"
+            else
+                CIDR_OR_SG=$(echo "$LINE" | awk '{print $2}')
+                echo "Protocol: $PROTOCOL | From Port: $FROM_PORT | To Port: $TO_PORT | CIDR/SG: $CIDR_OR_SG"
+            fi
+        fi
+    done <<< "$IP_PERMISSIONS_EGRESS"
+    
+    echo "-------------------------------------"
+done

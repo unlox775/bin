@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+
+from PIL import Image
+from io import BytesIO
+import zipfile
+import sys
+import os
+from datetime import datetime
+
+# Read the zip filename from first argument
+zip_filename = sys.argv[1]
+
+# function to warn to stderr
+def print_stderr(*args, **kwargs):
+    print(*args, file=sys.stderr, **kwargs)
+
+# Open the zip file
+with zipfile.ZipFile(zip_filename, 'r') as myzip:
+    for file_path in myzip.namelist():
+        # Make sure we're dealing with an image or video (case insensitive)
+        if file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.tiff', '.bmp', '.gif', '.heic', '.heif', '.mov', '.mp4', '.avi', '.wmv', '.webm', '.m4v', '.mpg', '.mpeg', '.m4a', '.aac', '.wav', '.mp3', '.aif', '.aiff', '.svg', '.psd')):
+            # Open each file as a byte stream
+            with myzip.open(file_path) as myfile:
+                file_name = os.path.basename(file_path)
+
+                # Open the image from the byte stream, catching errors if malformed
+                try:
+                    data = myfile.read()
+                    image = Image.open(BytesIO(data))
+                except Exception as e:
+                    print_stderr(f"Error opening {file_path}: {e}")
+                    image = None
+                    continue
+
+                if image is not None:
+                    # Extract the EXIF data
+                    exif_data = image._getexif()
+
+                # If no exif data, or no photo take date in the EXIF, set media_taken_date to None
+                if image is None or exif_data is None or 36867 not in exif_data:
+                    media_taken_date = None
+                else:
+                    # Get the photo taken date
+                    media_taken_date = exif_data[36867]
+                    # Format the date as YYYY-MM-DD HH:MM:SS
+                    try:
+                        media_taken_date = datetime.strptime(media_taken_date, "%Y:%m:%d %H:%M:%S")
+                    except Exception as e:
+                        print_stderr(f"Error parsing EXIF date {media_taken_date} for {file_path}: {e}")
+                        media_taken_date = None
+
+                # If the media taken is not present, or of there is no EXIF data, fall back to modification date of the file in the zip
+                if media_taken_date is None:
+                    print_stderr(f"  --> FB - {file_name} - no EXIF using zip file modification date")
+                    media_taken_date = myzip.getinfo(file_path).date_time
+                    # Format the date as YYYY-MM-DD HH:MM:SS
+                    media_taken_date = datetime(*media_taken_date)
+                else:
+                    print_stderr(f"  --> OK - {file_name} - {media_taken_date}")
+
+                # If still no media taken date, skip this file
+                if media_taken_date is None:
+                    print_stderr(f"  --> ERROR! Media taken date not found for {file_path}, skipping")
+                    continue
+                    
+
+                # Prep for CSV output, make an array of: file path, file_path, media_taken_date
+                output = [file_path, file_name, media_taken_date]
+                # If any double-quotes or newlines, escape them
+                output = [str(x).replace('"', '""').replace('\n', '\\n') for x in output]
+                # Output in fully qualified excel compatible double-quoted-with-escapes CSV in format: file path, file_path, media_taken_date
+                print(f'"{output[0]}","{output[1]}","{output[2]}"')
+
+            
+
+                
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# #!/usr/bin/env python3
+
+# import argparse
+# import csv
+# import os
+# import sys
+# from datetime import datetime
+# from io import BytesIO
+# from zipfile import ZipFile
+
+# import filetype
+# from PIL import Image
+# from hachoir.metadata import extractMetadata
+# from hachoir.parser import createParser
+
+
+# def main():
+#     parser = argparse.ArgumentParser()
+#     parser.add_argument("zipfile", help="The zip file to generate a media manifest for")
+#     args = parser.parse_args()
+
+#     with ZipFile(args.zipfile, 'r') as myzip:
+#         output_file = f"{os.path.splitext(args.zipfile)[0]}.media_manifest.csv"
+#         with open(output_file, 'w', newline='') as csvfile:
+#             fieldnames = ['file_path', 'file_name', 'creation_date']
+#             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+#             writer.writeheader()
+
+#             for zinfo in myzip.infolist():
+#                 try:
+#                     myfile = myzip.open(zinfo.filename)
+#                     process_file(myfile, zinfo.filename, writer, zinfo.date_time)
+#                 except Exception as e:
+#                     print(f"Error processing {zinfo.filename}: {e}", file=sys.stderr)
+
+
+# def process_file(file, file_path, writer, zip_modification_date):
+#     try:
+#         kind = filetype.guess(file)
+#         if kind is None:
+#             print('Cannot guess file type!', file=sys.stderr)
+#             return
+
+#         file.seek(0)
+#         if "image" in kind.mime:
+#             process_image_file(file, file_path, writer, zip_modification_date)
+#         elif "video" in kind.mime:
+#             process_video_file(file, file_path, writer, zip_modification_date)
+#     except Exception as e:
+#         print(f"Error processing file {file_path}: {e}", file=sys.stderr)
+
+
+# def process_image_file(file, file_path, writer, zip_modification_date):
+#     image = Image.open(file)
+#     if hasattr(image, '_getexif'):  # only present in JPEG.
+#         exifdata = image._getexif()
+#         if exifdata is not None:
+#             for tag, value in exifdata.items():
+#                 if tag == 36867:  # this is the tag for the date taken
+#                     date = datetime.strptime(value, "%Y:%m:%d %H:%M:%S")
+#                     break
+#             else:
+#                 date = datetime(*zip_modification_date)
+#         else:
+#             date = datetime(*zip_modification_date)
+#     else:
+#         date = datetime(*zip_modification_date)
+#     writer.writerow({'file_path': file_path, 'file_name': os.path.basename(file_path), 'creation_date': date})
+
+
+# def process_video_file(file, file_path, writer, zip_modification_date):
+#     parser = createParser(BytesIO(file.read()))
+#     metadata = extractMetadata(parser)
+#     date = metadata.get('creation_date')
+#     if date is None:
+#         date = datetime(*zip_modification_date)
+#     writer.writerow({'file_path': file_path, 'file_name': os.path.basename(file_path), 'creation_date': date})
+
+
+# if __name__ == "__main__":
+#     main()
