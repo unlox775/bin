@@ -1,53 +1,164 @@
-#!/bin/bash
+#!/usr/bin/env python3
 
-SECURITY_GROUP_IDS=$(aws ec2 describe-security-groups --query 'SecurityGroups[*].GroupId' --output text)
+import boto3
 
-for SG_ID in $SECURITY_GROUP_IDS; do
-    echo "Security Group ID: $SG_ID"
-    
-    # Inbound Rules
-    echo "Inbound Rules:"
-    IP_PERMISSIONS=$(aws ec2 describe-security-groups --group-ids $SG_ID --query 'SecurityGroups[*].IpPermissions[]' --output text)
-    while IFS=$'\n' read -r LINE; do
-        if [[ $LINE =~ ^-1 ]]; then
-            PROTOCOL="ALL"
-            FROM_PORT="ALL"
-            TO_PORT="ALL"
-        elif [[ $LINE =~ ^[0-9] ]]; then
-            FROM_PORT=$(echo "$LINE" | awk '{print $1}')
-            PROTOCOL=$(echo "$LINE" | awk '{print $2}')
-            TO_PORT=$(echo "$LINE" | awk '{print $3}')
-        else
-            if [[ $LINE =~ ^USERIDGROUPPAIRS ]]; then
-                echo "Protocol: $PROTOCOL | From Port: $FROM_PORT | To Port: $TO_PORT"
-            else
-                CIDR_OR_SG=$(echo "$LINE" | awk '{print $2}')
-                echo "Protocol: $PROTOCOL | From Port: $FROM_PORT | To Port: $TO_PORT | CIDR/SG: $CIDR_OR_SG"
-            fi
-        fi
-    done <<< "$IP_PERMISSIONS"
-    
-    # Outbound Rules
-    echo "Outbound Rules:"
-    IP_PERMISSIONS_EGRESS=$(aws ec2 describe-security-groups --group-ids $SG_ID --query 'SecurityGroups[*].IpPermissionsEgress[]' --output text)
-    while IFS=$'\n' read -r LINE; do
-        if [[ $LINE =~ ^-1 ]]; then
-            PROTOCOL="ALL"
-            FROM_PORT="ALL"
-            TO_PORT="ALL"
-        elif [[ $LINE =~ ^[0-9] ]]; then
-            FROM_PORT=$(echo "$LINE" | awk '{print $1}')
-            PROTOCOL=$(echo "$LINE" | awk '{print $2}')
-            TO_PORT=$(echo "$LINE" | awk '{print $3}')
-        else
-            if [[ $LINE =~ ^USERIDGROUPPAIRS ]]; then
-                echo "Protocol: $PROTOCOL | From Port: $FROM_PORT | To Port: $TO_PORT"
-            else
-                CIDR_OR_SG=$(echo "$LINE" | awk '{print $2}')
-                echo "Protocol: $PROTOCOL | From Port: $FROM_PORT | To Port: $TO_PORT | CIDR/SG: $CIDR_OR_SG"
-            fi
-        fi
-    done <<< "$IP_PERMISSIONS_EGRESS"
-    
-    echo "-------------------------------------"
-done
+def get_associated_resources(sg_id):
+    ec2 = boto3.resource('ec2')
+    rds = boto3.client('rds')
+    elbv2 = boto3.client('elbv2')
+    redshift = boto3.client('redshift')
+    lambda_client = boto3.client('lambda')
+    ecs = boto3.client('ecs')
+    fsx = boto3.client('fsx')
+    dms = boto3.client('dms')
+
+    # EC2 Instances
+    instances = list(ec2.instances.filter(Filters=[{'Name': 'instance.group-id', 'Values': [sg_id]}]))
+    if len(instances) > 0:
+        print(f"USING => EC2: {len(instances)} instance(s) {', '.join([i.id for i in instances[:3]])}")
+
+    # ELBs
+    elbs = elbv2.describe_load_balancers()
+    associated_elbs = [elb['LoadBalancerArn'] for elb in elbs['LoadBalancers'] if sg_id in elb['SecurityGroups']]
+    if len(associated_elbs) > 0:
+        print(f"USING => ELBs: {len(associated_elbs)}")
+
+    # RDS Databases
+    db_instances = rds.describe_db_instances()
+    associated_dbs = [db['DBInstanceIdentifier'] for db in db_instances['DBInstances'] if sg_id in db['VpcSecurityGroups']]
+    if len(associated_dbs) > 0:
+        print(f"USING => RDS: {len(associated_dbs)} database(s) {', '.join(associated_dbs[:3])}")
+
+    # Elasticache Clusters
+    elasticache = boto3.client('elasticache')
+    clusters = elasticache.describe_cache_clusters()
+    associated_clusters = [cluster['CacheClusterId'] for cluster in clusters['CacheClusters'] if sg_id in [sg['SecurityGroupId'] for sg in cluster['SecurityGroups']]]
+    if len(associated_clusters) > 0:
+        print(f"USING => Elasticache: {len(associated_clusters)} cluster(s) {', '.join(associated_clusters[:3])}")
+
+    # Redshift Clusters
+    clusters = redshift.describe_clusters()
+    associated_clusters = [cluster['ClusterIdentifier'] for cluster in clusters['Clusters'] if sg_id in [sg['VpcSecurityGroupId'] for sg in cluster['VpcSecurityGroups']]]
+    if len(associated_clusters) > 0:
+        print(f"USING => Redshift: {len(associated_clusters)} cluster(s) {', '.join(associated_clusters[:3])}")
+
+    # Lambda Functions
+    functions = lambda_client.list_functions()
+    associated_functions = [func['FunctionName'] for func in functions['Functions'] if sg_id in func.get('VpcConfig', {}).get('SecurityGroupIds', [])]
+    if len(associated_functions) > 0:
+        print(f"USING => Lambda: {len(associated_functions)} function(s) {', '.join(associated_functions[:3])}")
+
+    # ENIs
+    enis = list(ec2.network_interfaces.filter(Filters=[{'Name': 'group-id', 'Values': [sg_id]}]))
+    if len(enis) > 0:
+        print(f"USING => ENIs: {len(enis)} network interface(s) {', '.join([eni.id for eni in enis[:3]])}")
+
+    # # # ECS Tasks
+    # # task_arns = ecs.list_tasks()['taskArns']
+    # # associated_tasks = []
+    # # for task_arn in task_arns:
+    # #     task_detail = ecs.describe_tasks(tasks=[task_arn])['tasks'][0]
+    # #     if sg_id in task_detail.get('attachments', [{}])[0].get('details', [{}])[0].get('value', ''):
+    # #         associated_tasks.append(task_arn)
+    # # if len(associated_tasks) >= 3:
+    # #     print(f"USING => ECS: {len(associated_tasks)} task(s) {', '.join(associated_tasks[:3])}")
+    # cluster_arns = ecs.list_clusters()['clusterArns']
+    # all_task_arns = []
+    # associated_tasks = []
+    # for cluster_arn in cluster_arns:
+    #     task_arns = ecs.list_tasks(cluster=cluster_arn)['taskArns']
+    #     all_task_arns.extend(task_arns)
+    #     for task_arn in all_task_arns:
+    #         task_detail = ecs.describe_tasks(cluster=cluster_arn, tasks=[task_arn])['tasks'][0]
+    #         if sg_id in task_detail.get('attachments', [{}])[0].get('details', [{}])[0].get('value', ''):
+    #             associated_tasks.append(task_arn)
+    # if len(associated_tasks) > 0:
+    #     print(f"USING => ECS: {len(associated_tasks)} task(s) {', '.join(associated_tasks[:3])}, cluster: {cluster_arn}")
+
+
+
+    # FSx Filesystems
+    fsx_filesystems = fsx.describe_file_systems()['FileSystems']
+    associated_fsx = [fs['FileSystemId'] for fs in fsx_filesystems if sg_id in fs.get('SecurityGroupIds', [])]
+    if len(associated_fsx) > 0:
+        print(f"USING => FSx: {len(associated_fsx)} filesystem(s) {', '.join(associated_fsx[:3])}")
+
+    # DMS replication instances
+    dms_reps = dms.describe_replication_instances()['ReplicationInstances']
+    associated_dms = [rep['ReplicationInstanceIdentifier'] for rep in dms_reps if sg_id in [sg['VpcSecurityGroupId'] for sg in rep['VpcSecurityGroups']]]
+    if len(associated_dms) > 0:
+        print(f"USING => DMS: {len(associated_dms)} replication instance(s) {', '.join(associated_dms[:3])}")
+
+    # Create a dictionary to store the number of each associated resource
+    associated_resources = {
+        'EC2': len(instances),
+        'ELBs': len(associated_elbs),
+        'RDS': len(associated_dbs),
+        'Elasticache': len(associated_clusters),
+        'Redshift': len(associated_clusters),
+        'Lambda': len(associated_functions),
+        'ENIs': len(enis),
+        # 'ECS': len(associated_tasks),
+        'FSx': len(associated_fsx),
+        'DMS': len(associated_dms)
+    }
+
+    return associated_resources
+
+# Let's include the main function that lists the security groups and their rules
+def main():
+    ec2 = boto3.client('ec2')
+    security_groups = ec2.describe_security_groups()['SecurityGroups']
+
+    port_summary = {}
+
+    for sg in security_groups:
+        sg_id = sg['GroupId']
+        print(f"\nSecurity Group ID: {sg_id}")
+        rule_lines = []
+        for perm in sg['IpPermissions']:
+            from_port = perm.get('FromPort', 'ALL')
+            to_port = perm.get('ToPort', 'ALL')
+            protocol = perm.get('IpProtocol', 'ALL')
+            for range in perm['IpRanges']:
+                rule_lines.append(f"Protocol: {protocol} | From Port: {from_port} | To Port: {to_port} | CIDR: {range['CidrIp']}")
+        if len(rule_lines) > 0:
+            print("  <=== Inbound Rules:")
+            for line in rule_lines:
+                print(f"      {line}")
+        
+        rule_lines = []
+        for perm in sg['IpPermissionsEgress']:
+            from_port = perm.get('FromPort', 'ALL')
+            to_port = perm.get('ToPort', 'ALL')
+            protocol = perm.get('IpProtocol', 'ALL')
+            for range in perm['IpRanges']:
+                rule_lines.append(f"Protocol: {protocol} | From Port: {from_port} | To Port: {to_port} | CIDR: {range['CidrIp']}")
+            for sg_range in perm.get('UserIdGroupPairs', []):
+                rule_lines.append(f"Protocol: {protocol} | From Port: {from_port} | To Port: {to_port} | SG: {sg_range['GroupId']}")
+
+        if len(rule_lines) > 0:
+            print("  ===> Outbound Rules:")
+            for line in rule_lines:
+                print(f"      {line}")
+
+        # Now get the associated resources for this security group
+        associated_resources = get_associated_resources(sg_id)
+
+        for perm in sg['IpPermissions']:
+            port = perm.get('FromPort', 'ALL')
+            if port not in port_summary:
+                port_summary[port] = []
+            port_summary[port].append((sg_id, associated_resources))
+
+        print("----------------------------------------------------------", flush=True)
+
+    # Display port summary:
+    for port, sg_list in port_summary.items():
+        print(f"Inbound Port: {port}:")
+        for sg_id, resources in sg_list:
+            resources_str = ', '.join([f"{k}: {v}" for k, v in resources.items() if v > 0])
+            print(f"    Security Group ID: {sg_id} with attached: {resources_str}")
+
+if __name__ == '__main__':
+    main()
