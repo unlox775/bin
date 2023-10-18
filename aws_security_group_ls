@@ -1,16 +1,34 @@
 #!/usr/bin/env python3
 
 import boto3
+import sys
+import os
+
+# Check if the CLI arguments are provided and set the region and profile variables accordingly.
+# argv[0] is always the script name, so we start checking from argv[1].
+
+# Read the first command line arg as the region name; default to 'us-east-1'
+region_name = sys.argv[1] if len(sys.argv) > 1 else 'us-east-1'
+
+# Read the second command line arg as the profile name; default to 'default'
+profile_name = sys.argv[2] if len(sys.argv) > 2 else 'default'
+print(f"Using region: {region_name}, profile: {profile_name}")
+# set AWS_PROFILE and AWS_REGION environment variables, so aws-google gets them
+os.environ['AWS_PROFILE'] = profile_name
+os.environ['AWS_REGION'] = region_name
+
+session = boto3.Session(profile_name=profile_name, region_name=region_name)
+
 
 def get_associated_resources(sg_id):
-    ec2 = boto3.resource('ec2')
-    rds = boto3.client('rds')
-    elbv2 = boto3.client('elbv2')
-    redshift = boto3.client('redshift')
-    lambda_client = boto3.client('lambda')
-    ecs = boto3.client('ecs')
-    fsx = boto3.client('fsx')
-    dms = boto3.client('dms')
+    ec2 = session.resource('ec2')
+    rds = session.client('rds')
+    elbv2 = session.client('elbv2')
+    redshift = session.client('redshift')
+    lambda_client = session.client('lambda')
+    ecs = session.client('ecs')
+    fsx = session.client('fsx')
+    dms = session.client('dms')
 
     # EC2 Instances
     instances = list(ec2.instances.filter(Filters=[{'Name': 'instance.group-id', 'Values': [sg_id]}]))
@@ -30,7 +48,7 @@ def get_associated_resources(sg_id):
         print(f"USED BY => RDS: {len(associated_dbs)} database(s) {', '.join(associated_dbs[:3])}")
 
     # Elasticache Clusters
-    elasticache = boto3.client('elasticache')
+    elasticache = session.client('elasticache')
     clusters = elasticache.describe_cache_clusters()
     associated_clusters = [cluster['CacheClusterId'] for cluster in clusters['CacheClusters'] if sg_id in [sg['SecurityGroupId'] for sg in cluster['SecurityGroups']]]
     if len(associated_clusters) > 0:
@@ -107,7 +125,7 @@ def get_associated_resources(sg_id):
 
 # Let's include the main function that lists the security groups and their rules
 def main():
-    ec2 = boto3.client('ec2')
+    ec2 = session.client('ec2')
     security_groups = ec2.describe_security_groups()['SecurityGroups']
 
     port_summary = {}
