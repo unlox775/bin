@@ -15,43 +15,43 @@ def get_associated_resources(sg_id):
     # EC2 Instances
     instances = list(ec2.instances.filter(Filters=[{'Name': 'instance.group-id', 'Values': [sg_id]}]))
     if len(instances) > 0:
-        print(f"USING => EC2: {len(instances)} instance(s) {', '.join([i.id for i in instances[:3]])}")
+        print(f"USED BY => EC2: {len(instances)} instance(s) {', '.join([i.id for i in instances[:3]])}")
 
     # ELBs
     elbs = elbv2.describe_load_balancers()
     associated_elbs = [elb['LoadBalancerArn'] for elb in elbs['LoadBalancers'] if sg_id in elb['SecurityGroups']]
     if len(associated_elbs) > 0:
-        print(f"USING => ELBs: {len(associated_elbs)}")
+        print(f"USED BY => ELBs: {len(associated_elbs)}")
 
     # RDS Databases
     db_instances = rds.describe_db_instances()
     associated_dbs = [db['DBInstanceIdentifier'] for db in db_instances['DBInstances'] if sg_id in db['VpcSecurityGroups']]
     if len(associated_dbs) > 0:
-        print(f"USING => RDS: {len(associated_dbs)} database(s) {', '.join(associated_dbs[:3])}")
+        print(f"USED BY => RDS: {len(associated_dbs)} database(s) {', '.join(associated_dbs[:3])}")
 
     # Elasticache Clusters
     elasticache = boto3.client('elasticache')
     clusters = elasticache.describe_cache_clusters()
     associated_clusters = [cluster['CacheClusterId'] for cluster in clusters['CacheClusters'] if sg_id in [sg['SecurityGroupId'] for sg in cluster['SecurityGroups']]]
     if len(associated_clusters) > 0:
-        print(f"USING => Elasticache: {len(associated_clusters)} cluster(s) {', '.join(associated_clusters[:3])}")
+        print(f"USED BY => Elasticache: {len(associated_clusters)} cluster(s) {', '.join(associated_clusters[:3])}")
 
     # Redshift Clusters
     clusters = redshift.describe_clusters()
     associated_clusters = [cluster['ClusterIdentifier'] for cluster in clusters['Clusters'] if sg_id in [sg['VpcSecurityGroupId'] for sg in cluster['VpcSecurityGroups']]]
     if len(associated_clusters) > 0:
-        print(f"USING => Redshift: {len(associated_clusters)} cluster(s) {', '.join(associated_clusters[:3])}")
+        print(f"USED BY => Redshift: {len(associated_clusters)} cluster(s) {', '.join(associated_clusters[:3])}")
 
     # Lambda Functions
     functions = lambda_client.list_functions()
     associated_functions = [func['FunctionName'] for func in functions['Functions'] if sg_id in func.get('VpcConfig', {}).get('SecurityGroupIds', [])]
     if len(associated_functions) > 0:
-        print(f"USING => Lambda: {len(associated_functions)} function(s) {', '.join(associated_functions[:3])}")
+        print(f"USED BY => Lambda: {len(associated_functions)} function(s) {', '.join(associated_functions[:3])}")
 
     # ENIs
     enis = list(ec2.network_interfaces.filter(Filters=[{'Name': 'group-id', 'Values': [sg_id]}]))
     if len(enis) > 0:
-        print(f"USING => ENIs: {len(enis)} network interface(s) {', '.join([eni.id for eni in enis[:3]])}")
+        print(f"USED BY => ENIs: {len(enis)} network interface(s) {', '.join([eni.id for eni in enis[:3]])}")
 
     # # # ECS Tasks
     # # task_arns = ecs.list_tasks()['taskArns']
@@ -61,7 +61,7 @@ def get_associated_resources(sg_id):
     # #     if sg_id in task_detail.get('attachments', [{}])[0].get('details', [{}])[0].get('value', ''):
     # #         associated_tasks.append(task_arn)
     # # if len(associated_tasks) >= 3:
-    # #     print(f"USING => ECS: {len(associated_tasks)} task(s) {', '.join(associated_tasks[:3])}")
+    # #     print(f"USED BY => ECS: {len(associated_tasks)} task(s) {', '.join(associated_tasks[:3])}")
     # cluster_arns = ecs.list_clusters()['clusterArns']
     # all_task_arns = []
     # associated_tasks = []
@@ -73,7 +73,7 @@ def get_associated_resources(sg_id):
     #         if sg_id in task_detail.get('attachments', [{}])[0].get('details', [{}])[0].get('value', ''):
     #             associated_tasks.append(task_arn)
     # if len(associated_tasks) > 0:
-    #     print(f"USING => ECS: {len(associated_tasks)} task(s) {', '.join(associated_tasks[:3])}, cluster: {cluster_arn}")
+    #     print(f"USED BY => ECS: {len(associated_tasks)} task(s) {', '.join(associated_tasks[:3])}, cluster: {cluster_arn}")
 
 
 
@@ -81,13 +81,13 @@ def get_associated_resources(sg_id):
     fsx_filesystems = fsx.describe_file_systems()['FileSystems']
     associated_fsx = [fs['FileSystemId'] for fs in fsx_filesystems if sg_id in fs.get('SecurityGroupIds', [])]
     if len(associated_fsx) > 0:
-        print(f"USING => FSx: {len(associated_fsx)} filesystem(s) {', '.join(associated_fsx[:3])}")
+        print(f"USED BY => FSx: {len(associated_fsx)} filesystem(s) {', '.join(associated_fsx[:3])}")
 
     # DMS replication instances
     dms_reps = dms.describe_replication_instances()['ReplicationInstances']
     associated_dms = [rep['ReplicationInstanceIdentifier'] for rep in dms_reps if sg_id in [sg['VpcSecurityGroupId'] for sg in rep['VpcSecurityGroups']]]
     if len(associated_dms) > 0:
-        print(f"USING => DMS: {len(associated_dms)} replication instance(s) {', '.join(associated_dms[:3])}")
+        print(f"USED BY => DMS: {len(associated_dms)} replication instance(s) {', '.join(associated_dms[:3])}")
 
     # Create a dictionary to store the number of each associated resource
     associated_resources = {
@@ -111,17 +111,38 @@ def main():
     security_groups = ec2.describe_security_groups()['SecurityGroups']
 
     port_summary = {}
+    sg_with_no_attached_resources = []
+    service_groups_referenced_by_sg = {}
 
     for sg in security_groups:
         sg_id = sg['GroupId']
-        print(f"\nSecurity Group ID: {sg_id}")
+        name = sg['GroupName']
+        print(f"\nSecurity Group ID: {sg_id}, Name: {name}")
+        description = sg['Description']
+        if description:
+            print(f"Description: {description}")
         rule_lines = []
+        inbound_port_ranges = []
         for perm in sg['IpPermissions']:
             from_port = perm.get('FromPort', 'ALL')
             to_port = perm.get('ToPort', 'ALL')
             protocol = perm.get('IpProtocol', 'ALL')
+
+            # get the distinct profile of this port range
+            #    - Just show one port if from and to are the same, e.g. "80"
+            #    - But if they are different (i.e. a range of ports), show the range, e.g. "3000-3010"
+            port_range = perm.get('FromPort', 'ALL')
+            if port_range != 'ALL' and perm.get('ToPort', 'ALL') != port_range:
+                port_range = f"{port_range}-{perm['ToPort']}"
+            inbound_port_ranges.append(port_range)
+
             for range in perm['IpRanges']:
-                rule_lines.append(f"Protocol: {protocol} | From Port: {from_port} | To Port: {to_port} | CIDR: {range['CidrIp']}")
+                rule_lines.append(f"Protocol: {protocol} | From Port: {from_port} | To Port: {to_port} | Accessible from IP ranges, CIDR: {range['CidrIp']}")
+            for sg_range in perm.get('UserIdGroupPairs', []):
+                rule_lines.append(f"Protocol: {protocol} | From Port: {from_port} | To Port: {to_port} | Accessible from resources that are in Service Group: {sg_range['GroupId']}")
+                if sg_range['GroupId'] not in service_groups_referenced_by_sg:
+                    service_groups_referenced_by_sg[sg_range['GroupId']] = []
+                service_groups_referenced_by_sg[sg_range['GroupId']].append(f"{sg_id}[{name}]")
         if len(rule_lines) > 0:
             print("  <=== Inbound Rules:")
             for line in rule_lines:
@@ -133,9 +154,12 @@ def main():
             to_port = perm.get('ToPort', 'ALL')
             protocol = perm.get('IpProtocol', 'ALL')
             for range in perm['IpRanges']:
-                rule_lines.append(f"Protocol: {protocol} | From Port: {from_port} | To Port: {to_port} | CIDR: {range['CidrIp']}")
+                rule_lines.append(f"Protocol: {protocol} | From Port: {from_port} | To Port: {to_port} | Can connect outward to IP ranges, CIDR: {range['CidrIp']}")
             for sg_range in perm.get('UserIdGroupPairs', []):
-                rule_lines.append(f"Protocol: {protocol} | From Port: {from_port} | To Port: {to_port} | SG: {sg_range['GroupId']}")
+                rule_lines.append(f"Protocol: {protocol} | From Port: {from_port} | To Port: {to_port} | Can connect outward to resources that are in Service Group: {sg_range['GroupId']}")
+                if sg_range['GroupId'] not in service_groups_referenced_by_sg:
+                    service_groups_referenced_by_sg[sg_range['GroupId']] = []
+                service_groups_referenced_by_sg[sg_range['GroupId']].append(f"{sg_id}[{name}]")
 
         if len(rule_lines) > 0:
             print("  ===> Outbound Rules:")
@@ -145,20 +169,41 @@ def main():
         # Now get the associated resources for this security group
         associated_resources = get_associated_resources(sg_id)
 
-        for perm in sg['IpPermissions']:
-            port = perm.get('FromPort', 'ALL')
-            if port not in port_summary:
-                port_summary[port] = []
-            port_summary[port].append((sg_id, associated_resources))
+        # If there are no associated resources, add to the list of security groups with no attached resources
+        if sum(associated_resources.values()) == 0:
+            sg_with_no_attached_resources.append(f"{sg_id}[{name}]")
+        
+
+        for port_range in inbound_port_ranges:
+            if port_range not in port_summary:
+                port_summary[port_range] = []
+            port_summary[port_range].append((f"{sg_id}[{name}]", associated_resources))
 
         print("----------------------------------------------------------", flush=True)
 
     # Display port summary:
+    print("Report of inbound ports and the security groups that allow access to them:")
     for port, sg_list in port_summary.items():
         print(f"Inbound Port: {port}:")
         for sg_id, resources in sg_list:
+            # skip if there are no associated resources
+            if sum(resources.values()) == 0:
+                continue
             resources_str = ', '.join([f"{k}: {v}" for k, v in resources.items() if v > 0])
             print(f"    Security Group ID: {sg_id} with attached: {resources_str}")
+
+    # Display service groups with no attached resources, but referenced by other service groups
+    print("\nService Groups with no attached resources, but referenced by other service groups (link could be removed?):")
+    for sg in sg_with_no_attached_resources:
+        if sg in service_groups_referenced_by_sg:
+            print(f"    {sg} referenced by: {', '.join(service_groups_referenced_by_sg[sg])}")
+
+    # Display security groups with no attached resources, but only those that are not referenced by other service groups
+    print("\nSecurity Groups with no attached resources (could be deleted?):")
+    for sg in sg_with_no_attached_resources:
+        if sg not in service_groups_referenced_by_sg:
+            print(f"    {sg}")
+
 
 if __name__ == '__main__':
     main()
