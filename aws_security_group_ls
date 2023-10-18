@@ -33,8 +33,25 @@ def get_associated_resources(sg_id):
 
     # EC2 Instances
     instances = list(ec2.instances.filter(Filters=[{'Name': 'instance.group-id', 'Values': [sg_id]}]))
-    if len(instances) > 0:
-        print(f"USED BY => EC2: {len(instances)} instance(s) {', '.join([i.id for i in instances[:3]])}")
+    # count the number of instances that are running
+    running_instances = []
+    stopped_instances = []
+    for ec2_instance_obj in instances:        
+        instance_name = ''
+        if ec2_instance_obj.state['Name'] == 'running':
+            if len(running_instances) < 3:
+                ec2_instance = ec2_client.describe_instances(InstanceIds=[ec2_instance_obj.id])
+                instance_name = ec2_instance['Reservations'][0]['Instances'][0].get('Tags', [{'Key': 'Name', 'Value': ''}])[0]['Value']
+            running_instances.append(f"{ec2_instance_obj.id}[{instance_name}]")
+        else:
+            if len(stopped_instances) < 3:
+                ec2_instance = ec2_client.describe_instances(InstanceIds=[ec2_instance_obj.id])
+                instance_name = ec2_instance['Reservations'][0]['Instances'][0].get('Tags', [{'Key': 'Name', 'Value': ''}])[0]['Value']
+            stopped_instances.append(f"{ec2_instance_obj.id}[{instance_name}]")
+    if len(running_instances) > 0:
+        print(f"USED BY => EC2(Running): {len(running_instances)} instance(s) {', '.join(running_instances[:3])}")
+    if len(stopped_instances) > 0:
+        print(f"USED BY => EC2(Stopped): {len(stopped_instances)} instance(s) {', '.join(stopped_instances[:3])}")
 
     # ELBs
     elbs = elbv2.describe_load_balancers()
@@ -76,12 +93,13 @@ def get_associated_resources(sg_id):
     for eni_obj in enis:
         eni_response = ec2_client.describe_network_interfaces(NetworkInterfaceIds=[eni_obj.id])
         eni = eni_response['NetworkInterfaces'][0]
+        requester_id = eni.get('RequesterId', '-')
 
         attachment = eni.get('Attachment', {})
         if 'InstanceId' in attachment:
-            attached_enis.append(f"{eni_obj.id} ({eni['RequesterId']})")
+            attached_enis.append(f"{eni_obj.id} ({requester_id})")
         else:
-            non_attached_enis.append(f"{eni_obj.id} ({eni['RequesterId']})")
+            non_attached_enis.append(f"{eni_obj.id} ({requester_id})")
     if len(attached_enis) > 0:
         print(f"USED BY => Attached ENIs: {len(attached_enis)} network interface(s) {', '.join(attached_enis[:3])}")
     if len(non_attached_enis) > 0:
@@ -125,7 +143,8 @@ def get_associated_resources(sg_id):
 
     # Create a dictionary to store the number of each associated resource
     associated_resources = {
-        'EC2': len(instances),
+        'EC2(Running)': len(running_instances),
+        'EC2(Stopped)': len(stopped_instances),
         'ELBs': len(associated_elbs),
         'RDS': len(associated_dbs),
         'Elasticache': len(associated_clusters),
@@ -222,6 +241,9 @@ def main():
     print("Report of inbound ports and the security groups that allow access to them:")
     sorted_port_summary = sorted(port_summary.items(), key=lambda x: x[0])
     for port, sg_list in sorted_port_summary:
+        # skip if there are no associated resources
+        if sum([sum(resources.values()) for sg_id, resources in sg_list]) == 0:
+            continue
         print(f"Inbound Port: {port}:")
         for sg_id, resources in sg_list:
             # skip if there are no associated resources

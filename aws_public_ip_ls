@@ -1,0 +1,97 @@
+#!/usr/bin/env python3
+
+import boto3
+import sys
+import os
+import socket
+
+def list_public_ips(profile_name, region):
+    session = boto3.Session(profile_name=profile_name, region_name=region)
+    
+    print(f"Using region: {region}, profile: {profile_name}\n")
+    
+    # EC2 Instances
+    ec2 = session.client('ec2')
+    response = ec2.describe_instances()
+    print("Public IP's for EC2 Instances:")
+    for reservation in response['Reservations']:
+        for instance in reservation['Instances']:
+            public_ip = instance.get('PublicIpAddress')
+            if public_ip:
+                instance_name = instance.get('KeyName', 'No Name Found')
+                for tag in instance.get('Tags', []):
+                    if tag['Key'] == 'Name':
+                        instance_name = tag['Value']
+                print(f"{public_ip} ==> Id: {instance['InstanceId']} - {instance_name}")
+    print("\n")
+    
+    # Elastic Load Balancers (Classic)
+    elb = session.client('elb')
+    response = elb.describe_load_balancers()
+    print("Elastic Load Balancers:")
+    for lb in response['LoadBalancerDescriptions']:
+        if lb['Scheme'] == 'internet-facing':
+            lb_name = lb.get('LoadBalancerName', lb['DNSName'])
+            try:
+                ip_addresses_objs = socket.getaddrinfo(lb['DNSName'], None, family=socket.AF_INET)
+                ip_addrs = []
+                for ip in ip_addresses_objs:
+                    ip_addrs.append(ip[4][0])
+                # keep only distinct values
+                ip_addrs = list(set(ip_addrs))
+                # print the first line with IP like normal
+                print(f"{ip_addrs[0]} ==> Id: {lb_name} - {lb['DNSName']}")
+                # Then print any remaining ones after, but indented
+                for ip in ip_addrs[1:]:
+                    print(f"  ==> {ip}")
+            except Exception as e:
+                print(f"Error resolving {lb['DNSName']} - {str(e)}")
+    
+    # Elastic Load Balancers (V2 - Application Load Balancer)
+    elbv2 = session.client('elbv2')
+    response = elbv2.describe_load_balancers()
+    for lb in response['LoadBalancers']:
+        if lb['Scheme'] == 'internet-facing':
+            print(f"{lb['DNSName']} ==> Id: {lb['LoadBalancerName']}")
+    print("\n")
+    
+    # Elastic IPs
+    response = ec2.describe_addresses()
+    print("Elastic IPs:")
+    for address in response['Addresses']:
+        instance_id = address.get('InstanceId', 'Not associated')
+        print(f"{address['PublicIp']} ==> Id: {instance_id}")
+    print("\n")
+    
+    # RDS Instances
+    rds = session.client('rds')
+    response = rds.describe_db_instances()
+    print("Public IPs for RDS Instances:")
+    for db_instance in response['DBInstances']:
+        if db_instance['PubliclyAccessible']:
+            endpoint_address = db_instance['Endpoint']['Address']
+            db_name = db_instance.get('DBName', endpoint_address)
+            try:
+                ip_addresse_objs = socket.getaddrinfo(endpoint_address, None, family=socket.AF_INET)
+                ip_addrs = []
+                for ip in ip_addresse_objs:
+                    ip_addrs.append(ip[4][0])
+                # keep only distinct values
+                ip_addrs = list(set(ip_addrs))
+                print(f"{ip_addrs[0]} ==> Id: {db_instance['DBInstanceIdentifier']} - {db_name} / {endpoint_address}")
+                for ip in ip_addrs[1:]:
+                    print(f"  ==> {ip}")
+            except Exception as e:
+                print(f"Error resolving {endpoint_address} - {str(e)}")
+
+    print("\n")
+
+if __name__ == '__main__':
+    if len(sys.argv) < 3:
+        print("Usage: script_name.py <profile_name> <region>")
+        sys.exit(1)
+    profile_name = sys.argv[1]
+    region = sys.argv[2]
+    os.environ['AWS_PROFILE'] = profile_name
+    os.environ['AWS_REGION'] = region
+    list_public_ips(profile_name, region)

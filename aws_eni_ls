@@ -2,6 +2,7 @@
 
 import boto3
 import sys
+import os
 
 def describe_eni(eni_id, region='us-east-1', profile='default'):
     # Initialize boto3 session and clients
@@ -17,6 +18,7 @@ def describe_eni(eni_id, region='us-east-1', profile='default'):
     print(f"ENI ID: {eni['NetworkInterfaceId']}")
     print(f"Description: {eni['Description']}")
     print(f"Status: {eni['Status']}")
+    print(f"RequesterID: {eni['RequesterId']}")
     print(f"Private IP: {eni['PrivateIpAddress']}")
     print(f"Subnet ID: {eni['SubnetId']}")
     print(f"VPC ID: {eni['VpcId']}")
@@ -106,5 +108,7 @@ if __name__ == "__main__":
     region = sys.argv[2] if len(sys.argv) > 2 else 'us-east-1'
     profile = sys.argv[3] if len(sys.argv) > 3 else 'default'
 
+    os.environ['AWS_PROFILE'] = profile
+    os.environ['AWS_REGION'] = region
     describe_eni(eni_id, region, profile)
 
