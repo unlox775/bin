@@ -1,0 +1,110 @@
+#!/usr/bin/env python3
+
+import boto3
+import sys
+
+def describe_eni(eni_id, region='us-east-1', profile='default'):
+    # Initialize boto3 session and clients
+    session = boto3.Session(region_name=region, profile_name=profile)
+    ec2_client = session.client('ec2')
+
+    # Describe the ENI
+    eni_response = ec2_client.describe_network_interfaces(NetworkInterfaceIds=[eni_id])
+    eni = eni_response['NetworkInterfaces'][0]
+
+    print(f"Details for ENI: {eni_id}")
+    print("==========================================")
+    print(f"ENI ID: {eni['NetworkInterfaceId']}")
+    print(f"Description: {eni['Description']}")
+    print(f"Status: {eni['Status']}")
+    print(f"Private IP: {eni['PrivateIpAddress']}")
+    print(f"Subnet ID: {eni['SubnetId']}")
+    print(f"VPC ID: {eni['VpcId']}")
+    print(f"Private DNS Name: {eni['PrivateDnsName']}")
+
+    # List the Security Groups
+    print("\nSecurity Groups:")
+    for sg in eni['Groups']:
+        print(f"\n  Security Group ID: {sg['GroupId']}")
+        print(f"  Group Name: {sg['GroupName']}")
+
+        sg_response = ec2_client.describe_security_groups(GroupIds=[sg['GroupId']])
+        security_group = sg_response['SecurityGroups'][0]
+
+        # List Inbound Rules
+        sg = security_group
+        rule_lines = []
+        for perm in sg['IpPermissions']:
+            from_port = perm.get('FromPort', 'ALL')
+            to_port = perm.get('ToPort', 'ALL')
+            protocol = perm.get('IpProtocol', 'ALL')
+
+            for range in perm['IpRanges']:
+                rule_lines.append(f"Protocol: {protocol} | From Port: {from_port} | To Port: {to_port} | Accessible from IP ranges, CIDR: {range['CidrIp']}")
+            for sg_range in perm.get('UserIdGroupPairs', []):
+                rule_lines.append(f"Protocol: {protocol} | From Port: {from_port} | To Port: {to_port} | Accessible from resources that are in Service Group: {sg_range['GroupId']}")
+        print("  <=== Inbound Rules:")
+        for line in rule_lines:
+            print(f"      {line}")
+        
+        # List Outbound Rules
+        rule_lines = []
+        for perm in sg['IpPermissionsEgress']:
+            from_port = perm.get('FromPort', 'ALL')
+            to_port = perm.get('ToPort', 'ALL')
+            protocol = perm.get('IpProtocol', 'ALL')
+            for range in perm['IpRanges']:
+                rule_lines.append(f"Protocol: {protocol} | From Port: {from_port} | To Port: {to_port} | Can connect outward to IP ranges, CIDR: {range['CidrIp']}")
+            for sg_range in perm.get('UserIdGroupPairs', []):
+                rule_lines.append(f"Protocol: {protocol} | From Port: {from_port} | To Port: {to_port} | Can connect outward to resources that are in Service Group: {sg_range['GroupId']}")
+
+        print("  ===> Outbound Rules:")
+        for line in rule_lines:
+            print(f"      {line}")
+
+    # List Attachments
+    attachment = eni.get('Attachment', {})
+    print("\nAttachments:")
+    if attachment:
+        print(f"  Instance ID: {attachment.get('InstanceId', '- (this means not attached to an EC2 instance, though it may be attached to another resource like a lambda function or ECS task)')}")
+        print(f"  Attachment ID: {attachment.get('AttachmentId', '-')}")
+        print(f"  Device Index: {attachment.get('DeviceIndex', '-')}")
+        print(f"  Attachment Status: {attachment.get('Status', '-')}")
+        #Debug: print out the attachment object
+        print(attachment)
+        
+        if 'InstanceId' in attachment:
+            instance_id = attachment['InstanceId']
+            ec2 = session.resource('ec2')
+            instance = ec2.Instance(instance_id)
+            print(f"\nAttachment Details for EC2:")
+            print(f"  Instance ID: {instance.id}")
+            print(f"  Instance Type: {instance.instance_type}")
+            print(f"  Launch Time: {instance.launch_time}")
+            print(f"  Instance State: {instance.state['Name']}")
+    else:
+        print("  No attachments for this ENI.")
+
+    # Additional ENI Configuration Details
+    print("\nAdditional Configuration:")
+    print(f"  Source/Dest Check: {'Enabled' if eni['SourceDestCheck'] else 'Disabled'}")
+    print(f"  MAC Address: {eni['MacAddress']}")
+    if 'Association' in eni:
+        print(f"  Public IP: {eni['Association']['PublicIp']}")
+        print(f"  Public DNS Name: {eni['Association']['PublicDnsName']}")
+    if 'PrivateIpAddresses' in eni:
+        for private_ip in eni['PrivateIpAddresses']:
+            print(f"  Secondary Private IP: {private_ip['PrivateIpAddress']}")
+
+if __name__ == "__main__":
+    # Check command line arguments
+    if len(sys.argv) < 2:
+        print("Usage: aws_eni_ls <eni-id> [region] [profile]")
+        sys.exit(1)
+
+    eni_id = sys.argv[1]
+    region = sys.argv[2] if len(sys.argv) > 2 else 'us-east-1'
+    profile = sys.argv[3] if len(sys.argv) > 3 else 'default'
+
+    describe_eni(eni_id, region, profile)
+
