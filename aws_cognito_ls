@@ -1,0 +1,42 @@
+#!/usr/bin/env python3
+
+import boto3
+import sys
+import os
+
+def list_cognito_pools(region, profile):
+    # Set up boto3 session using provided profile
+    session = boto3.Session(profile_name=profile, region_name=region)
+    
+    # Create a client for the Cognito Identity service
+    cognito_identity_client = session.client('cognito-identity')
+    
+    # Get the list of identity pools
+    response = cognito_identity_client.list_identity_pools(MaxResults=60) # Maximum allowed by AWS is 60
+    
+    return response.get('IdentityPools', [])
+
+def main():
+    # Check command line arguments
+    if len(sys.argv) < 2:
+        print("Usage: aws_eni_ls <eni-id> [region] [profile]")
+        sys.exit(1)
+
+    region = sys.argv[1] if len(sys.argv) > 1 else 'us-east-1'
+    profile = sys.argv[2] if len(sys.argv) > 2 else 'default'
+
+    os.environ['AWS_PROFILE'] = profile
+    os.environ['AWS_REGION'] = region
+    
+    pools = list_cognito_pools(region, profile)
+    
+    if not pools:
+        print(f"No Cognito Identity Pools found in region {region} for profile {profile}.")
+        return
+    
+    print(f"Cognito Identity Pools in region {region} for profile {profile}:")
+    for pool in pools:
+        print(f"ID: {pool['IdentityPoolId']}, Name: {pool['IdentityPoolName']}")
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,46 @@
+#!/usr/bin/env python3
+
+import boto3
+import sys
+import os
+
+def list_ec2_amis(region, profile):
+    # Set up boto3 session using provided profile
+    session = boto3.Session(profile_name=profile, region_name=region)
+    
+    # Create a client for the EC2 service
+    ec2_client = session.client('ec2')
+    
+    # Get the list of AMIs
+    response = ec2_client.describe_images(Owners=['self'])
+    
+    return response.get('Images', [])
+
+def main():
+    # Check command line arguments
+    if len(sys.argv) < 2:
+        print("Usage: aws_ami_ls <region> [profile]")
+        sys.exit(1)
+
+    region = sys.argv[1] if len(sys.argv) > 1 else 'us-east-1'
+    profile = sys.argv[2] if len(sys.argv) > 2 else 'default'
+
+    os.environ['AWS_PROFILE'] = profile
+    os.environ['AWS_REGION'] = region
+    
+    amis = list_ec2_amis(region, profile)
+    
+    if not amis:
+        print(f"No EC2 AMIs found in region {region} for profile {profile}.")
+        return
+    
+    print(f"EC2 AMIs in region {region} for profile {profile}:")
+    # sort, public first, then sort by root device type
+    amis.sort(key=lambda ami: ami['RootDeviceType'])
+    amis.sort(key=lambda ami: ami['Public'], reverse=True)
+    for ami in amis:
+        public_status = "Public" if ami['Public'] else "Private"
+        print(f"ID: {ami['ImageId']}, Root Device Type: {ami['RootDeviceType']}, Status: {public_status}")
+
+if __name__ == '__main__':
+    main()
