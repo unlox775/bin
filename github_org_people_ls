@@ -1,0 +1,82 @@
+#!/usr/bin/env python3
+
+import requests
+import sys
+import csv
+import os
+
+GITHUB_API_URL = "https://api.github.com"
+
+TOKEN = os.environ.get("GITHUB_TOKEN")
+
+HEADERS = {
+    "Accept": "application/vnd.github.v3+json"
+}
+
+if TOKEN:
+    # print to STDERR so it doesn't get captured by the CSV
+    print(f"Using GitHub token ...", file=sys.stderr)
+    HEADERS["Authorization"] = f"token {TOKEN}"
+
+def list_org_members(org):
+    url = f"{GITHUB_API_URL}/orgs/{org}/members"
+    members = []
+    
+    while url:
+        response = requests.get(url, headers=HEADERS)
+
+        if response.status_code != 200:
+            print(f"Failed to fetch members. GitHub returned status: {response.status_code}. {response.text}")
+            break
+
+        member = response.json()
+        # print(member, file=sys.stderr)
+        members.extend(member)
+
+        # Handle pagination by getting the "next" URL from the Link header
+        link_header = response.headers.get('Link', '')
+        links = link_header.split(',')
+        link_by_rel = {}
+        for link in links:
+            if len(link.split(';')) != 2:
+                continue
+            link_by_rel[link.split(';')[1].strip()] = link.split(';')[0].strip(' <>')
+        next_link = link_by_rel.get('rel="next"')
+        print(f"Next link: {next_link}", file=sys.stderr)
+
+        url = next_link if next_link else None
+
+    # Convert member data to the format we want for the CSV
+    member_details = []
+    for member in members:
+        member_details.append({
+            'name': member.get('name', 'N/A'),
+            'email': member.get('email', 'N/A'),
+            'username': member['login'],
+            'id': member['id'],
+            'avatar_url': member['avatar_url'],
+            'profile_url': member['html_url']
+        })
+
+    return member_details
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: github_org_members_list <org>")
+        sys.exit(1)
+
+    org = sys.argv[1]
+
+    member_details = list_org_members(org)
+
+    if not member_details:
+        print(f"No members found for organization: {org}")
+        return
+
+    print("name, email, username, id, avatar_url, profile_url")
+    writer = csv.DictWriter(sys.stdout, fieldnames=['name', 'email', 'username', 'id', 'avatar_url', 'profile_url'], quoting=csv.QUOTE_ALL)
+    for member in member_details:
+        writer.writerow(member)
+
+if __name__ == '__main__':
+    main()

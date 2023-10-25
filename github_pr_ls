@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+
+import requests
+import sys
+import csv
+import os
+
+GITHUB_API_URL = "https://api.github.com"
+
+TOKEN = os.environ.get("GITHUB_TOKEN")
+
+HEADERS = {
+    "Accept": "application/vnd.github.v3+json"
+}
+
+if TOKEN:
+    # print to STDERR so it doesn't get captured by the CSV
+    print(f"Using GitHub token ...", file=sys.stderr)
+    HEADERS["Authorization"] = f"token {TOKEN}"
+
+global_incomplete_data = False
+
+def list_prs(owner, repo, get_commits=False):
+    url = f"{GITHUB_API_URL}/repos/{owner}/{repo}/pulls?state=all"
+    
+    incomplete_data = False
+    pr_details = []
+
+    while url:
+        response = requests.get(url, headers=HEADERS)
+
+        if response.status_code != 200:
+            print(f"Failed to fetch PRs. GitHub returned status: {response.status_code}. {response.text}")
+            incomplete_data = True
+            break
+
+        prs = response.json()
+
+        for pr in prs:
+            # print(pr)
+            
+            commits = []
+            commit_usernames = ["data not read, see --commits flag"]
+            if get_commits:
+                commits_url = pr['commits_url']
+                commits_response = requests.get(commits_url, headers=HEADERS)
+
+                if commits_response.status_code != 200:
+                    print(f"Failed to fetch commits. GitHub returned status: {commits_response.status_code}. {commits_response.text}")
+                    incomplete_data = True
+                    break
+
+                commits = commits_response.json()
+                # print(commits)
+
+                commit_usernames = list(set([f"{commit['commit']['committer']['name']}/{commit['commit']['committer']['email']}" for commit in commits]))
+
+            pr_details.append({
+                'name': pr['title'],
+                'owner': pr['user']['login'],
+                'date_submitted': pr['created_at'],
+                'state': pr['state'],
+                'merged_at': pr['merged_at'],
+                'num_commits': len(commits),
+                'commit_usernames': ', '.join(commit_usernames)
+            })
+
+        # Handle pagination by getting the "next" URL from the Link header
+        # Check if there's a next page and update the URL, or set it to None if we're on the last page
+        link_header = response.headers.get('Link', '')
+        # print(f"Link header: {link_header}", file=sys.stderr)
+        links = link_header.split(',')
+        link_by_rel = {}
+        for link in links:
+            # skip if there are not 2 ; separated parts
+            if len(link.split(';')) != 2:
+                continue
+            link_by_rel[link.split(';')[1].strip()] = link.split(';')[0].strip(' <>')
+        # print(f"Link by rel: {link_by_rel}", file=sys.stderr)
+        next_link = link_by_rel.get('rel="next"')
+        print(f"Next link: {next_link}", file=sys.stderr)
+
+        url = next_link if next_link else None
+
+        if incomplete_data:
+            global_incomplete_data = True
+            break
+
+    return pr_details
+
+def main():
+    if len(sys.argv) < 3:
+        print("Usage: github_prs_list <owner> <repo> [--commits]")
+        sys.exit(1)
+
+    owner = sys.argv[1]
+    repo = sys.argv[2]
+
+    # if they passed the commits flag, get the commits
+    get_commits = False
+    if len(sys.argv) > 3:
+        get_commits = sys.argv[3] == '--commits'
+
+    pr_details = list_prs(owner, repo, get_commits=get_commits)
+
+    if not pr_details:
+        print(f"No PRs found for {owner}/{repo}")
+        return
+
+    print("name, owner, date_submitted, state, merged_at, num_commits, commit_usernames")
+    writer = csv.DictWriter(sys.stdout, fieldnames=['name', 'owner', 'date_submitted', 'state', 'merged_at', 'num_commits', 'commit_usernames'], quoting=csv.QUOTE_ALL)
+    for pr in pr_details:
+        writer.writerow(pr)
+
+if __name__ == '__main__':
+    main()
