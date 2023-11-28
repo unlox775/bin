@@ -1,0 +1,78 @@
+#!/usr/bin/env python3
+
+import boto3
+import sys
+import os
+import json
+
+def list_buckets(region, profile):
+    session = boto3.Session(region_name=region, profile_name=profile)
+    s3 = session.client('s3')
+    buckets = s3.list_buckets()['Buckets']
+    return buckets
+
+def get_bucket_policy(s3, bucket_name):
+    try:
+        policy = s3.get_bucket_policy(Bucket=bucket_name)
+        return json.loads(policy['Policy'])
+    except Exception as e:
+        print(f"{bucket_name} ==> Error getting policy for bucket: {e}")
+        return None
+
+def analyze_policy(policy, current_account_id):
+    cross_account_principals = []
+    for statement in policy.get('Statement', []):
+        principal = statement.get('Principal')
+        if isinstance(principal, dict) and 'AWS' in principal:
+            # Handle both single and multiple principals
+            aws_principals = principal['AWS']
+            if not isinstance(aws_principals, list):
+                aws_principals = [aws_principals]
+
+            for aws_principal in aws_principals:
+                # If the principal is "*", then return "* can do {action} on {resource}"
+                if aws_principal == "*":
+                    cross_account_principals.append(f"* can do {statement['Action']} on {statement['Resource']}")
+                if f'arn:aws:iam::{current_account_id}:' not in aws_principal:
+                    cross_account_principals.append(aws_principal + f" can do {statement['Action']} on {statement['Resource']}")
+    return cross_account_principals
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: s3_policy_analyzer <region> [profile]")
+        sys.exit(1)
+
+    region = sys.argv[1]
+    profile = sys.argv[2] if len(sys.argv) > 2 else 'default'
+
+    os.environ['AWS_PROFILE'] = profile
+    os.environ['AWS_REGION'] = region
+
+    session = boto3.Session(region_name=region, profile_name=profile)
+    sts = session.client('sts')
+    current_account_id = sts.get_caller_identity()["Account"]
+
+    buckets = list_buckets(region, profile)
+    if not buckets:
+        print(f"No buckets found in region {region} for profile {profile}.")
+        return
+
+    s3 = session.client('s3')
+    for bucket in buckets:
+        bucket_name = bucket['Name']
+        policy = get_bucket_policy(s3, bucket_name)
+        if policy:
+            cross_account_principals = analyze_policy(policy, current_account_id)
+            # if there are any cross-account principals, print them
+            if cross_account_principals:
+                print(f"{bucket_name} ==> has cross-account access from the following principals:")
+                for principal in cross_account_principals:
+                    print(f"  {principal}")
+                print("")
+            else:
+                print(f"{bucket_name} ==> has no cross-account access.")
+        # else:
+        #     print(f"{bucket_name} ==> has no policy or policy could not be retrieved.")
+
+if __name__ == '__main__':
+    main()
