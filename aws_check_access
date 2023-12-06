@@ -1,0 +1,61 @@
+#!/usr/bin/env python3
+
+import boto3
+import sys
+from botocore.exceptions import ClientError
+
+def test_s3_access(s3_client):
+    try:
+        buckets = s3_client.list_buckets()
+        print(f"Access to list S3 buckets: SUCCESS. Buckets count: {len(buckets['Buckets'])}")
+    except ClientError as e:
+        print(f"Access to list S3 buckets: FAILED. Error: {e}")
+
+def test_secrets_manager_access(secrets_client):
+    try:
+        secrets = secrets_client.list_secrets()
+        print(f"Access to list Secrets Manager secrets: SUCCESS. Secrets count: {len(secrets['SecretList'])}")
+    except ClientError as e:
+        print(f"Access to list Secrets Manager secrets: FAILED. Error: {e}")
+
+def test_iam_access(iam_client):
+    try:
+        users = iam_client.list_users()
+        print(f"Access to list IAM users: SUCCESS. Users count: {len(users['Users'])}")
+    except ClientError as e:
+        print(f"Access to list IAM users: FAILED. Error: {e}")
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: aws_check_access <Access Key ID>")
+        sys.exit(1)
+
+    access_key_id = sys.argv[1]
+    secret_access_key = input("Enter Secret Access Key: ")
+
+    session = boto3.Session(
+        aws_access_key_id=access_key_id,
+        aws_secret_access_key=secret_access_key
+    )
+
+    # Additional Code to Get Account and User Metadata
+    sts_client = session.client('sts')
+    try:
+        identity = sts_client.get_caller_identity()
+        print(f"AWS Account ID: {identity['Account']}")
+        print(f"User ARN: {identity['Arn']}")
+        print(f"User ID: {identity['UserId']}")
+    except ClientError as e:
+        print(f"Failed to retrieve user and account metadata: {e}")
+
+    s3_client = session.client('s3')
+    secrets_client = session.client('secretsmanager')
+    iam_client = session.client('iam')
+
+    test_s3_access(s3_client)
+    test_secrets_manager_access(secrets_client)
+    test_iam_access(iam_client)
+
+
+if __name__ == '__main__':
+    main()

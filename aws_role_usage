@@ -1,0 +1,62 @@
+#!/usr/bin/env python3
+
+import boto3
+import sys
+import os
+
+# Read the command line args for region and profile, defaulting to 'us-east-1' and 'default'.
+region_name = sys.argv[1] if len(sys.argv) > 1 else 'us-east-1'
+profile_name = sys.argv[2] if len(sys.argv) > 2 else 'default'
+role_name = sys.argv[3] if len(sys.argv) > 3 else None
+
+if not role_name:
+    print("Please provide an IAM role name as an argument.")
+    sys.exit(1)
+
+print(f"Using region: {region_name}, profile: {profile_name}, role: {role_name}")
+os.environ['AWS_PROFILE'] = profile_name
+os.environ['AWS_REGION'] = region_name
+
+session = boto3.Session(profile_name=profile_name, region_name=region_name)
+iam = session.client('iam')
+
+def check_ec2_instances(role_name):
+    try:
+        instance_profile = iam.get_instance_profile(InstanceProfileName=role_name)
+        if not instance_profile:
+            print(f"Could not find instance profile: {role_name}")
+            return
+        instance_profile_arn = instance_profile.get('InstanceProfile', {}).get('Arn', '')
+        ec2 = session.resource('ec2')
+        instances = ec2.instances.all()
+        for instance in instances:
+            profile_arn = instance.iam_instance_profile['Arn'] if instance.iam_instance_profile else ''
+            # print(f"EC2 Instance: {instance.id} uses role {profile_arn}")
+            # print(f"Checking if EC2 Instance: {instance.id} uses role {role_arn}")
+            if instance_profile_arn in profile_arn:
+                print(f"EC2 Instance: {instance.id} uses role {role_name}")
+    except Exception as e:
+        print(f"Error checking EC2 instances: {e}")
+        return
+
+def check_lambda_functions(role_arn):
+    lambda_client = session.client('lambda')
+    functions = lambda_client.list_functions()
+    for function in functions['Functions']:
+        print(f"Checking if Lambda Function: {function['FunctionName']} uses role {role_name}")
+        if role_arn == function['Role']:
+            print(f"Lambda Function: {function['FunctionName']} uses role {role_name}")
+
+def main():
+    role = iam.get_role(RoleName=role_name)
+    if not role:
+        print(f"Could not find role: {role_name}")
+        sys.exit(1)
+    role_arn = role['Role']['Arn']
+
+    print(f"Checking for resources using the role: {role_name}")
+    check_ec2_instances(role_name)
+    check_lambda_functions(role_arn)
+
+if __name__ == '__main__':
+    main()

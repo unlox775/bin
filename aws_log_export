@@ -1,0 +1,160 @@
+#!/usr/bin/env python3
+
+import sys
+import json
+import subprocess
+from datetime import datetime
+import argparse
+import os
+import pytz
+
+def convert_to_epoch_ms(timestamp_str):
+    dt = datetime.fromisoformat(timestamp_str)
+    dt_utc = dt.astimezone(pytz.utc)
+    return int(dt_utc.timestamp() * 1000)
+
+def export_logs(profile, region, log_group, log_stream, start_time, end_time):
+    os.environ['AWS_PROFILE'] = profile
+    os.environ['AWS_REGION'] = region
+    start_time_ms = convert_to_epoch_ms(start_time)
+    end_time_ms = convert_to_epoch_ms(end_time)
+
+    next_token = None
+    page_count = 0
+    print("Downloading logs...", file=sys.stderr)
+
+    while True:
+        command = [
+            "aws", "logs", "filter-log-events",
+            "--log-group-name", log_group,
+            "--log-stream-names", log_stream,
+            "--start-time", str(start_time_ms),
+            "--end-time", str(end_time_ms),
+            "--limit", "10000"
+        ]
+
+        if next_token:
+            command.extend(["--next-token", next_token])
+
+        result = subprocess.run(command, stdout=subprocess.PIPE, text=True)
+        if result.returncode != 0:
+            print("Error executing AWS CLI command", file=sys.stderr)
+            sys.exit(1)
+
+        response = json.loads(result.stdout)
+        for event in response.get('events', []):
+            print(json.dumps(event))
+
+        next_token = response.get('nextToken')
+
+        page_count += 1
+        print('.', end='', file=sys.stderr)
+        #flush
+        sys.stderr.flush()
+        if not next_token:
+            break
+
+    print(f"\nTotal pages of data fetched: {page_count}", file=sys.stderr)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Export AWS logs to stdout.")
+    parser.add_argument("profile", help="AWS profile name")
+    parser.add_argument("region", help="AWS region")
+    parser.add_argument("log_group", help="Log group name")
+    parser.add_argument("log_stream", help="Log stream name")
+    parser.add_argument("--start", help="Start time in format YYYY-MM-DDTHH:MM:SS-08:00", required=True)
+    parser.add_argument("--end", help="End time in format YYYY-MM-DDTHH:MM:SS-08:00", required=True)
+
+    args = parser.parse_args()
+
+    export_logs(args.profile, args.region, args.log_group, args.log_stream, args.start, args.end)
+
+if __name__ == "__main__":
+    main()
+
+
+
+# import boto3
+# import json
+# from datetime import datetime
+# import pytz
+# import argparse
+# import os
+# import sys
+
+# def parse_datetime(date_string):
+#     # Parse the ISO format datetime string to a datetime object
+#     dt = datetime.fromisoformat(date_string)
+#     # Convert it to UTC
+#     dt_utc = dt.astimezone(pytz.utc)
+#     return int(dt_utc.timestamp() * 1000)
+
+# def fetch_logs(profile_name, region, log_group, log_stream, start_time, end_time):
+#     os.environ['AWS_PROFILE'] = profile_name
+#     os.environ['AWS_REGION'] = region
+#     session = boto3.Session(profile_name=profile_name, region_name=region)
+#     client = session.client('logs')
+
+#     next_token = None
+#     page_count = 0
+
+#     sys.stderr.write("Downloading logs...\n")
+
+#     while True:
+#         if next_token:
+#             response = client.get_log_events(
+#                 logGroupName=log_group,
+#                 logStreamName=log_stream,
+#                 startTime=start_time,
+#                 endTime=end_time,
+#                 nextToken=next_token,
+#                 limit=10000
+#             )
+#         else:
+#             response = client.get_log_events(
+#                 logGroupName=log_group,
+#                 logStreamName=log_stream,
+#                 startTime=start_time,
+#                 endTime=end_time,
+#                 limit=10000
+#             )
+
+#         for event in response['events']:
+#             print(json.dumps(event))
+
+#         # print the response, but everything except the events
+#         print(json.dumps({k: v for k, v in response.items() if k != 'events'}))
+#         print("Total events: ", len(response['events']))
+
+#         if not response.get('nextForwardToken') or next_token == response.get('nextForwardToken'):
+#             break
+
+#         next_token = response.get('nextForwardToken')
+
+#         sys.stderr.write('.')
+#         page_count += 1
+
+#     sys.stderr.write(f"\nTotal pages of data fetched: {page_count}\n")
+
+# def main():
+#     parser = argparse.ArgumentParser()
+#     parser.add_argument("profile_name")
+#     parser.add_argument("region")
+#     parser.add_argument("log_group_name")
+#     parser.add_argument("log_stream_name")
+#     parser.add_argument("--start", required=True)
+#     parser.add_argument("--end", required=True)
+
+#     args = parser.parse_args()
+
+#     # Get and print to STDERR the start and end times
+#     start_time = parse_datetime(args.start)
+#     end_time = parse_datetime(args.end)
+#     sys.stderr.write(f"Start time: {start_time}\n")
+#     sys.stderr.write(f"End time: {end_time}\n")
+
+#     fetch_logs(args.profile_name, args.region, args.log_group_name, args.log_stream_name, start_time, end_time)
+
+# if __name__ == "__main__":
+#     main()

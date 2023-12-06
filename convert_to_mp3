@@ -1,0 +1,25 @@
+#!/bin/bash
+
+convert_audio() {
+    dir="$1"
+
+    # Check if directory exists
+    if [ ! -d "$dir" ]; then
+        echo "Error: '${dir}' is not a directory"
+        exit 1
+    fi
+
+    cd "$dir"
+    output_dir="./converted_to_mp3"
+
+    # Create output directory if it doesn't exist
+    mkdir -p "$output_dir"
+
+    # Convert audio files to MP3
+    find . -maxdepth 1 -type f \( -iname "*.m4a" -o -iname "*.ogg" -o -iname "*.wav" -o -iname "*.aiff" \) -exec bash -c 'ffmpeg -i "$0" -ab 128k "${1}/${0%.*}.mp3"' {} "$output_dir" \;
+}
+
+# Process each directory passed as an argument
+for dir in "$@"; do
+    convert_audio "$dir"
+done
