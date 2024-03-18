@@ -13,16 +13,17 @@ def list_public_ips(profile_name, region):
     # EC2 Instances
     ec2 = session.client('ec2')
     response = ec2.describe_instances()
-    print("Public IP's for EC2 Instances:")
+    print("Public IP's for EC2 Instances (with private IP address):")
     for reservation in response['Reservations']:
         for instance in reservation['Instances']:
             public_ip = instance.get('PublicIpAddress')
+            private_ip = instance.get('PrivateIpAddress')
             if public_ip:
                 instance_name = instance.get('KeyName', 'No Name Found')
                 for tag in instance.get('Tags', []):
                     if tag['Key'] == 'Name':
                         instance_name = tag['Value']
-                print(f"{public_ip} ==> Id: {instance['InstanceId']} - {instance_name}")
+                print(f"{public_ip} ==> Id: {instance['InstanceId']} ({private_ip}) - {instance_name}")
     print("\n")
     
     # Elastic Load Balancers (Classic)
