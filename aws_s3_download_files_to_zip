@@ -1,0 +1,49 @@
+#!/usr/bin/env python3
+
+import sys
+import boto3
+from io import BytesIO
+import zipfile
+import os
+
+def download_files_to_zip(output_zip_name, profile_name, region, bucket_name, *object_keys):
+    # Initialize a session using AWS profile
+    session = boto3.Session(profile_name=profile_name, region_name=region)
+    s3 = session.client('s3')
+    
+    # The BytesIO object will serve as a buffer for the ZIP file
+    zip_buffer = BytesIO()
+    
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+        for object_key in object_keys:
+            # Retrieve the object from S3
+            print(f"Downloading {object_key} from {bucket_name}")
+            s3_response = s3.get_object(Bucket=bucket_name, Key=object_key)
+            file_contents = s3_response['Body'].read()
+            
+            # Add the file to the zip
+            zip_file.writestr(object_key, file_contents)
+    
+    # Move the pointer to the beginning of the BytesIO buffer
+    zip_buffer.seek(0)
+    
+    # Write the ZIP file to disk
+    with open(output_zip_name, 'wb') as f:
+        f.write(zip_buffer.getvalue())
+
+if __name__ == '__main__':
+    if len(sys.argv) < 6:
+        print("Usage: aws_s3_download_files_to_zip [output zip file name] [AWS-profile] [aws-region] [s3-bucket-name] [object-key-one] [object-key-two] ...")
+        sys.exit(1)
+    
+    output_zip_name = sys.argv[1]
+    profile_name = sys.argv[2]
+    region = sys.argv[3]
+    bucket_name = sys.argv[4]
+    object_keys = sys.argv[5:]
+
+    # Set AWS profile and region environment variables
+    os.environ['AWS_PROFILE'] = profile_name
+    os.environ['AWS_DEFAULT_REGION'] = region
+    
+    download_files_to_zip(output_zip_name, profile_name, region, bucket_name, *object_keys)
