@@ -1,0 +1,25 @@
+#!/usr/bin/env python3
+
+import boto3
+from botocore import UNSIGNED
+from botocore.config import Config
+import sys
+
+def list_bucket_objects(bucket_name):
+    # Create a Boto3 client for S3 with unsigned configuration
+    s3_client = boto3.client('s3', config=Config(signature_version=UNSIGNED))
+    
+    try:
+        # List objects within the specified bucket
+        response = s3_client.list_objects_v2(Bucket=bucket_name)
+        if 'Contents' in response:
+            for item in response['Contents']:
+                print(f'Key: {item["Key"]} - Last Modified: {item["LastModified"]} - Size: {item["Size"]} bytes')
+        else:
+            print("No objects found in the bucket.")
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
+# get bucket name from reading CLI first arg
+bucket_name = sys.argv[1]
+list_bucket_objects(bucket_name)

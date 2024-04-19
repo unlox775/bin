@@ -1,0 +1,24 @@
+#!/usr/bin/perl
+
+# Usage: cat file.txt | swap_tokens BUCKET=test-string
+# This script expects environment variables in the form KEY=value and will replace
+# %KEY% with value and %_KEY_% with value where hyphens are replaced with underscores in value.
+
+%replacements = ();
+foreach my $arg (@ARGV) {
+    if ($arg =~ /^(.*?)=(.*)$/) {
+        $replacements{$1} = $2;
+    }
+}
+
+while (<STDIN>) {
+    foreach my $key (keys %replacements) {
+        my $value = $replacements{$key};
+        my $underscore_value = lc($value);
+        $underscore_value =~ s/\W/_/g;  # Replace dashes with underscores for the underscore pattern
+
+        s/%$key%/$value/g;              # Replace placeholders like %KEY%
+        s/%_\Q$key\E_%/$underscore_value/g; # Replace placeholders like %_KEY_%
+    }
+    print;
+}

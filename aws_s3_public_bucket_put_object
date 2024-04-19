@@ -1,0 +1,30 @@
+#!/usr/bin/env python3
+
+import boto3
+from botocore.config import Config
+import sys
+import random
+import string
+
+def put_object_to_bucket(bucket_name, object_name):
+    # Create a Boto3 client for S3 with unsigned configuration
+    s3_client = boto3.client(
+        's3',
+        config=Config(signature_version='s3v4', s3={'addressing_style': 'path'})
+    )
+    
+    # Generate a random string
+    random_string = ''.join(random.choices(string.ascii_letters + string.digits, k=20))
+    print(f"Random string to upload: {random_string}")
+
+    try:
+        # Put the random string into the specified bucket and object
+        response = s3_client.put_object(Bucket=bucket_name, Key=object_name, Body=random_string)
+        print(f"Object uploaded successfully: {response}")
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
+# Get bucket name and object name from command line arguments
+bucket_name = sys.argv[1]
+object_name = sys.argv[2]
+put_object_to_bucket(bucket_name, object_name)
