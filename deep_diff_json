@@ -1,0 +1,48 @@
+#!/usr/bin/env python3
+
+import json
+from deepdiff import DeepDiff
+
+def sort_json(obj):
+    if isinstance(obj, dict):
+        return {k: sort_json(v) for k, v in sorted(obj.items())}
+    if isinstance(obj, list):
+        return sorted((sort_json(x) for x in obj), key=lambda x: json.dumps(x, sort_keys=True))
+    return obj
+
+def load_and_sort_json(file_path):
+    with open(file_path, 'r') as file:
+        return sort_json(json.load(file))
+
+def format_diff(diff):
+    formatted_diff = ""
+    for change_type, changes in diff.items():
+        formatted_diff += f"{change_type}:\n"
+        if isinstance(changes, dict):
+            for key, value in changes.items():
+                formatted_diff += f"  - {key}: {value}\n"
+        elif isinstance(changes, list):
+            for item in changes:
+                formatted_diff += f"  - {item}\n"
+        else:
+            formatted_diff += f"  - {changes}\n"
+    return formatted_diff
+
+def main(expected_file, actual_file):
+    expected_json = load_and_sort_json(expected_file)
+    actual_json = load_and_sort_json(actual_file)
+
+    diff = DeepDiff(expected_json, actual_json, ignore_order=True)
+    if not diff:
+        print("The JSON files are equivalent.")
+    else:
+        print("Differences found:")
+        formatted_diff = format_diff(diff)
+        print(formatted_diff)
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) != 3:
+        print(f"Usage: {sys.argv[0]} <expected_json_file> <actual_json_file>")
+        sys.exit(1)
+    main(sys.argv[1], sys.argv[2])
