@@ -1,0 +1,118 @@
+#!/usr/bin/env python3
+
+import csv
+import re
+import time
+import os
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
+
+def apply_patterns(source_file, column_number, patterns_file, output_file):
+    with open(source_file, 'r', newline='') as csvfile:
+        reader = csv.reader(csvfile)
+        header = next(reader)
+        rows = list(reader)
+
+    # if row doesn't have exactly one tab, skip it, and keep track of the number of skipped lines
+    skipped_lines = 0
+    with open(patterns_file, 'r') as pfile:
+        # Also handle:
+        # - lines with an empty replacement, should still end up with a 2-element list with an empty string as the second element
+        # - lines with more than one tab, should be split on the first tab only
+        # do a special after check that the result is always a 2-element list
+        patterns = []
+        for line in pfile:
+            pattern = line.strip().split('\t', 1)
+            if len(pattern) == 1:
+                pattern.append('')
+
+            # if the replacement has \1 swaps, make sure we quote it so it will work
+            if pattern[1].count('\\') > 0:
+                pattern[1] = pattern[1].replace('\\', '\\\\')
+            if pattern[0] != '' and len(pattern) == 2:
+                p, r = line.strip().split('\t')
+                patterns.append((re.compile(p), r))
+            else:
+                print(f"SKIPPING - {line.strip()} in the patterns file")
+                skipped_lines += 1
+
+    if skipped_lines:
+        print(f"SKIPPING - {skipped_lines} lines in the patterns file do not have exactly one tab.")
+ 
+    if not patterns:
+        print("SKIPPING - No patterns found in the patterns file.")
+        return
+
+    modified_rows = []
+    for row in rows:
+        original_value = row[column_number]
+        new_value = original_value
+
+        for pattern, replacement in patterns:
+ #           print(f"Pattern: {pattern} | Replacement: {replacement}")
+            new_value = re.sub(pattern, replacement, new_value)
+ #           print(f"Original: {original_value} | New: {new_value}")
+
+ #       print(f"Original: {original_value} | New: {new_value}")
+        row[column_number] = new_value
+        modified_rows.append(row)
+
+    # Group by unique values and sum the last column
+    grouped_rows = {}
+    for row in modified_rows:
+        key = tuple(row[:-1])
+        count = int(row[-1])
+        if key in grouped_rows:
+            grouped_rows[key] += count
+        else:
+            grouped_rows[key] = count
+
+    with open(output_file, 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(header)
+        for key, count in grouped_rows.items():
+            writer.writerow(list(key) + [count])
+
+class PatternsFileHandler(FileSystemEventHandler):
+    def __init__(self, source_file, column_number, patterns_file, output_file):
+        self.source_file = source_file
+        self.column_number = column_number
+        self.patterns_file = patterns_file
+        self.output_file = output_file
+
+    def on_modified(self, event):
+        if event.src_path == self.patterns_file:
+            apply_patterns(self.source_file, self.column_number, self.patterns_file, self.output_file)
+            print(f"Regenerated {self.output_file} based on changes in {self.patterns_file}")
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Apply regex patterns to a specified column in a CSV file.")
+    parser.add_argument('source_file', help="Path to the source CSV file")
+    parser.add_argument('column_number', type=int, help="Column number to apply patterns on (0-based index)")
+    parser.add_argument('patterns_file', help="Path to the patterns file")
+    args = parser.parse_args()
+
+    source_file = args.source_file
+    column_number = args.column_number - 1 # for 0-based index
+    patterns_file = os.path.abspath(args.patterns_file)
+    output_file = source_file.replace('.csv', '.refiltered.csv')
+
+    apply_patterns(source_file, column_number, patterns_file, output_file)
+    print(f"Initial generation of {output_file} complete.")
+
+    event_handler = PatternsFileHandler(source_file, column_number, patterns_file, output_file)
+    observer = Observer()
+    observer.schedule(event_handler, os.path.dirname(patterns_file) or '.', recursive=False)
+    observer.start()
+    print(f"Watching {patterns_file} for changes...")
+
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        observer.stop()
+    observer.join()
+
+if __name__ == "__main__":
+    main()
