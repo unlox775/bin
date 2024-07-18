@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+
+import inquirer
+import boto3
+import sys
+import os
+
+def get_instances(search_term):
+    ec2 = boto3.client('ec2')
+    instances = ec2.describe_instances(
+        Filters=[
+            {'Name': 'instance-state-name', 'Values': ['running']}
+        ]
+    )['Reservations']
+
+    result = []
+    for reservation in instances:
+        for instance in reservation['Instances']:
+            instance_tags = instance.get('Tags', [])
+            instance_name = next((tag['Value'] for tag in instance_tags if tag['Key'] == 'Name'), '')
+            if (search_term in instance['InstanceId'] or
+                search_term in instance_name or
+                any(search_term in tag['Value'] for tag in instance_tags)):
+                instance_info = {
+                    'id': instance['InstanceId'],
+                    'name': instance_name or 'N/A',
+                    'tags': {tag['Key']: tag['Value'] for tag in instance_tags}
+                }
+                result.append(instance_info)
+
+    return result
+
+def select_instance(instances, search_term):
+    choices = []
+
+    # Chop menu items at screen width minus 5 chars
+    max_name_length = os.get_terminal_size().columns - 5
+
+    for instance in instances:
+        matching_tags = {key: value for key, value in instance['tags'].items() if search_term in value}
+        menu_option = f"{instance['id']} - {instance['name']} - {matching_tags}"
+        choices.append(menu_option[:max_name_length])
+
+    questions = [
+        inquirer.List('selected_instance',
+                      message="Which instance do you want to connect to?",
+                      choices=choices)
+    ]
+    try:
+        answers = inquirer.prompt(questions)
+        if answers is None:
+            print("\nSelection cancelled. Exiting.")
+            sys.exit(0)
+        return answers['selected_instance']
+    except KeyboardInterrupt:
+
+        sys.exit(0)
+
+def connect_to_instance(instance_id):
+    os.execvp('aws', ['aws', 'ssm', 'start-session', '--target', instance_id])
+
+def main():
+    # print usage if no search term is provided
+    if len(sys.argv) < 2:
+        print("Usage: aws_ec2_ssm_instance_connect <search_term>")
+        return
+
+    # get search term from first CLI arg
+    search_term = sys.argv[1]
+    
+    instances = get_instances(search_term)
+
+    if not instances:
+        print("No instances found matching the search term.")
+        return
+
+    selected_instance = select_instance(instances, search_term)
+
+    instance_id = selected_instance.split(' - ')[0]
+    connect_to_instance(instance_id)
+
+if __name__ == "__main__":
+    main()
