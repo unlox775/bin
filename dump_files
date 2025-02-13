@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+
+import os
+import sys
+
+def is_binary_file(filepath):
+    """Check if a file is binary by reading a portion of the file and checking for non-text characters."""
+    try:
+        with open(filepath, 'rb') as file:
+            chunk = file.read(1024)  # Read the first 1KB to check for binary characters
+            if b'\x00' in chunk:
+                return True
+            return False
+    except Exception as e:
+        print(f"Error checking if {filepath} is binary: {e}")
+        return True  # If in doubt, assume it's binary to be safe
+
+def process_file(filepath):
+    """Read and print the file content if it's a text file."""
+    try:
+        # Check if the file is binary or text
+        if not is_binary_file(filepath):
+            with open(filepath, 'r', encoding='utf-8', errors='ignore') as file:
+                print(f"{'='*40}\nFile: {filepath}\n{'='*40}\n")
+                print(file.read())
+                print("\n\n")  # Add two blank lines after each file content
+        else:
+            print(f"{'='*40}\nFile: {filepath}\n{'='*40}")
+            print(f"Binary file, not outputting content.\n")
+    except Exception as e:
+        print(f"Error reading {filepath}: {e}")
+
+def find_files(directory):
+    """Find and yield files in the provided directory, ignoring subdirectories."""
+    for root, _, files in os.walk(directory):
+        for file in files:
+            yield os.path.join(root, file)
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: dump_files <directory or files>")
+        sys.exit(1)
+
+    # Loop through each argument provided, either directories or files
+    for path in sys.argv[1:]:
+        if os.path.isfile(path):
+            process_file(path)
+        elif os.path.isdir(path):
+            for file in find_files(path):
+                process_file(file)
+        else:
+            print(f"{path} is not a valid file or directory")
+
+if __name__ == "__main__":
+    main()

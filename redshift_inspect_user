@@ -1,0 +1,211 @@
+#!/usr/bin/env python3
+"""
+redshift_inspect_user: Inspect usage and ownership details for a given Redshift user.
+
+Example usage:
+  ./redshift_inspect_user \
+    --conn redshift://admin@my-cluster.us-east-1.redshift.amazonaws.com:5439/dev \
+    --target-user old_employee
+
+This will prompt for the 'admin' password, then connect to Redshift and:
+  1) List all DB objects owned by 'old_employee'.
+  2) Show their recent login events.
+  3) Show their recent queries.
+
+Note: The actual queries can be adjusted or expanded to suit your environment.
+"""
+
+import argparse
+import getpass
+import psycopg2
+import urllib.parse
+import sys
+
+
+def parse_connection_uri(conn_uri: str):
+    """
+    Parse a connection string of the form:
+      scheme://[user[:password]@]host[:port]/[dbname]
+    into psycopg2.connect() parameters.
+
+    For example:
+      redshift://admin@mycluster.us-east-1.redshift.amazonaws.com:5439/dev
+    """
+    # Use urllib.parse to handle the basic structure:
+    parsed = urllib.parse.urlparse(conn_uri)
+
+    # Translate into psycopg2 parameters
+    # Scheme might be "redshift", "postgres", or "postgresql"—psycopg2
+    # doesn’t strictly care as long as we pass host, port, etc.
+    params = {
+        'host': parsed.hostname,
+        'port': parsed.port or 5439,  # Default Redshift port
+        'database': parsed.path.lstrip('/') or 'dev',  # Default to 'dev' if none
+        'user': parsed.username,
+    }
+    # We won't store the password here because we'll prompt for it securely later
+    return params
+
+
+def inspect_objects_owned_by(cursor, target_user: str):
+    """
+    Show database objects owned by the target_user.
+    We can look in PG_CLASS joined with PG_USER, for example.
+    """
+    query = """
+    SELECT n.nspname AS schema_name,
+           c.relname AS object_name,
+           CASE c.relkind
+                WHEN 'r' THEN 'table'
+                WHEN 'v' THEN 'view'
+                WHEN 'i' THEN 'index'
+                WHEN 'S' THEN 'sequence'
+                WHEN 't' THEN 'TOAST table'
+                ELSE c.relkind::text
+           END as object_type
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    JOIN pg_user u ON u.usesysid = c.relowner
+    WHERE u.usename = %s
+      AND n.nspname NOT IN ('pg_catalog','information_schema','pg_internal')
+      AND c.relkind NOT IN ('','c')  -- Exclude some special objects
+    ORDER BY schema_name, object_name;
+    """
+
+    cursor.execute(query, (target_user,))
+    rows = cursor.fetchall()
+
+    if not rows:
+        print(f"No objects found owned by user: {target_user}")
+    else:
+        print(f"Objects owned by user '{target_user}':")
+        for row in rows:
+            print(f"  Schema: {row[0]} | Object: {row[1]} | Type: {row[2]}")
+    print()
+
+
+def inspect_login_events(cursor, target_user: str):
+    """
+    Show recent connection attempts by the target_user from stl_connection_log.
+    stl_connection_log retains data about user logins for a certain period.
+    """
+    query = """
+    SELECT 
+       username,
+       event,
+       remotehost,
+       recordtime AS start_time,
+       duration AS end_time
+    FROM stl_connection_log
+    WHERE username = %s
+    ORDER BY recordtime DESC
+    LIMIT 5000;  -- or however many you want
+    """
+
+    cursor.execute(query, (target_user,))
+    rows = cursor.fetchall()
+
+    if not rows:
+        print(f"No login events found for user '{target_user}' (within STL retention).")
+    else:
+        print(f"Recent login events for user '{target_user}':")
+        for row in rows:
+            print(f"  user={row[0].rstrip()} event={row[1].rstrip()} host={row[2].rstrip()} start={row[3]} duration={row[4]}")
+    print()
+
+
+def inspect_recent_queries(cursor, target_user: str):
+    """
+    Show recent queries run by the target user from stl_query or svl_statementtext.
+    Note: stl_query might require superuser or relevant permissions to see all.
+    """
+    query = """
+    SELECT
+        query,
+        substring(querytxt, 1, 100) as short_querytxt,
+        starttime,
+        endtime
+    FROM stl_query
+    WHERE userid = (
+      SELECT usesysid
+      FROM pg_user
+      WHERE usename = %s
+    )
+    ORDER BY starttime DESC
+    LIMIT 50;
+    """
+
+    cursor.execute(query, (target_user,))
+    rows = cursor.fetchall()
+
+    if not rows:
+        print(f"No recent queries found for user '{target_user}' (within STL retention).")
+    else:
+        print(f"Recent queries by user '{target_user}':")
+        for row in rows:
+            print(f"  query_id={row[0]} | '{row[1]}'... start={row[2]} end={row[3]}")
+    print()
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Inspect usage and ownership details for a given Redshift user."
+    )
+    parser.add_argument(
+        "--conn",
+        required=True,
+        help=(
+            "Redshift connection URI, e.g. redshift://admin@host:5439/dbname "
+            "(password will be prompted)."
+        ),
+    )
+    parser.add_argument(
+        "--target-user",
+        required=True,
+        help="Which Redshift user do you want to inspect?",
+    )
+
+    args = parser.parse_args()
+
+    # Parse the connection parameters (minus password)
+    conn_params = parse_connection_uri(args.conn)
+
+    # Prompt for password securely
+    user_for_prompt = conn_params["user"]
+    if not user_for_prompt:
+        print("Error: The connection URI must include a username (e.g. ...//admin@host...).")
+        sys.exit(1)
+
+    pw = getpass.getpass(prompt=f"Password for '{user_for_prompt}': ")
+
+    # Connect to Redshift
+    try:
+        conn = psycopg2.connect(
+            host=conn_params["host"],
+            port=conn_params["port"],
+            dbname=conn_params["database"],
+            user=conn_params["user"],
+            password=pw,
+        )
+        conn.autocommit = True  # Usually safe for read-only queries
+    except Exception as e:
+        print(f"Failed to connect to Redshift: {e}")
+        sys.exit(1)
+
+    with conn.cursor() as cur:
+        print(f"\nConnected. Inspecting user '{args.target_user}'...\n")
+
+        # 1. Inspect objects owned by the target user
+        inspect_objects_owned_by(cur, args.target_user)
+
+        # 2. Inspect login events
+        inspect_login_events(cur, args.target_user)
+
+        # 3. Inspect recent queries
+        inspect_recent_queries(cur, args.target_user)
+
+    conn.close()
+
+
+if __name__ == "__main__":
+    main()
