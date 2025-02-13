@@ -1,18 +1,12 @@
 #!/usr/bin/env python3
 """
-redshift_inspect_user: Inspect usage and ownership details for a given Redshift user.
+redshift_inspect_user: Inspect usage and ownership details for a given Redshift user,
+plus additional data like role memberships, active sessions, stored procs, etc.
 
 Example usage:
   ./redshift_inspect_user \
     --conn redshift://admin@my-cluster.us-east-1.redshift.amazonaws.com:5439/dev \
     --target-user old_employee
-
-This will prompt for the 'admin' password, then connect to Redshift and:
-  1) List all DB objects owned by 'old_employee'.
-  2) Show their recent login events.
-  3) Show their recent queries.
-
-Note: The actual queries can be adjusted or expanded to suit your environment.
 """
 
 import argparse
@@ -20,37 +14,21 @@ import getpass
 import psycopg2
 import urllib.parse
 import sys
-
+import json
 
 def parse_connection_uri(conn_uri: str):
-    """
-    Parse a connection string of the form:
-      scheme://[user[:password]@]host[:port]/[dbname]
-    into psycopg2.connect() parameters.
-
-    For example:
-      redshift://admin@mycluster.us-east-1.redshift.amazonaws.com:5439/dev
-    """
-    # Use urllib.parse to handle the basic structure:
     parsed = urllib.parse.urlparse(conn_uri)
-
-    # Translate into psycopg2 parameters
-    # Scheme might be "redshift", "postgres", or "postgresql"—psycopg2
-    # doesn’t strictly care as long as we pass host, port, etc.
     params = {
         'host': parsed.hostname,
-        'port': parsed.port or 5439,  # Default Redshift port
-        'database': parsed.path.lstrip('/') or 'dev',  # Default to 'dev' if none
+        'port': parsed.port or 5439, 
+        'database': parsed.path.lstrip('/') or 'dev',
         'user': parsed.username,
     }
-    # We won't store the password here because we'll prompt for it securely later
     return params
-
 
 def inspect_objects_owned_by(cursor, target_user: str):
     """
-    Show database objects owned by the target_user.
-    We can look in PG_CLASS joined with PG_USER, for example.
+    Show database objects owned by the target_user (tables, views, etc.).
     """
     query = """
     SELECT n.nspname AS schema_name,
@@ -61,6 +39,7 @@ def inspect_objects_owned_by(cursor, target_user: str):
                 WHEN 'i' THEN 'index'
                 WHEN 'S' THEN 'sequence'
                 WHEN 't' THEN 'TOAST table'
+                WHEN 'm' THEN 'materialized view'
                 ELSE c.relkind::text
            END as object_type
     FROM pg_class c
@@ -68,61 +47,41 @@ def inspect_objects_owned_by(cursor, target_user: str):
     JOIN pg_user u ON u.usesysid = c.relowner
     WHERE u.usename = %s
       AND n.nspname NOT IN ('pg_catalog','information_schema','pg_internal')
-      AND c.relkind NOT IN ('','c')  -- Exclude some special objects
+      AND c.relkind NOT IN ('','c')
     ORDER BY schema_name, object_name;
     """
-
     cursor.execute(query, (target_user,))
     rows = cursor.fetchall()
+    return rows
 
-    if not rows:
-        print(f"No objects found owned by user: {target_user}")
-    else:
-        print(f"Objects owned by user '{target_user}':")
-        for row in rows:
-            print(f"  Schema: {row[0]} | Object: {row[1]} | Type: {row[2]}")
-    print()
-
-
-def inspect_login_events(cursor, target_user: str):
+def inspect_login_events(cursor, target_user: str, limit=5000):
     """
     Show recent connection attempts by the target_user from stl_connection_log.
-    stl_connection_log retains data about user logins for a certain period.
     """
-    query = """
-    SELECT 
+    query = f"""
+    SELECT
        username,
        event,
        remotehost,
        recordtime AS start_time,
-       duration AS end_time
+       duration
     FROM stl_connection_log
     WHERE username = %s
     ORDER BY recordtime DESC
-    LIMIT 5000;  -- or however many you want
+    LIMIT {limit};
     """
-
     cursor.execute(query, (target_user,))
     rows = cursor.fetchall()
+    return rows
 
-    if not rows:
-        print(f"No login events found for user '{target_user}' (within STL retention).")
-    else:
-        print(f"Recent login events for user '{target_user}':")
-        for row in rows:
-            print(f"  user={row[0].rstrip()} event={row[1].rstrip()} host={row[2].rstrip()} start={row[3]} duration={row[4]}")
-    print()
-
-
-def inspect_recent_queries(cursor, target_user: str):
+def inspect_recent_queries(cursor, target_user: str, limit=50):
     """
-    Show recent queries run by the target user from stl_query or svl_statementtext.
-    Note: stl_query might require superuser or relevant permissions to see all.
+    Show recent queries run by the target user from stl_query.
     """
-    query = """
+    query = f"""
     SELECT
         query,
-        substring(querytxt, 1, 100) as short_querytxt,
+        querytxt,
         starttime,
         endtime
     FROM stl_query
@@ -132,20 +91,101 @@ def inspect_recent_queries(cursor, target_user: str):
       WHERE usename = %s
     )
     ORDER BY starttime DESC
-    LIMIT 50;
+    LIMIT {limit};
     """
-
     cursor.execute(query, (target_user,))
     rows = cursor.fetchall()
+    return rows
 
-    if not rows:
-        print(f"No recent queries found for user '{target_user}' (within STL retention).")
-    else:
-        print(f"Recent queries by user '{target_user}':")
-        for row in rows:
-            print(f"  query_id={row[0]} | '{row[1]}'... start={row[2]} end={row[3]}")
-    print()
+def inspect_group_membership(cursor, target_user: str):
+    """
+    List the groups/roles the user is a member of.
+    Redshift uses 'pg_group' similarly to Postgres, but the approach may differ by version.
+    """
+    # One possible approach: pg_group.grolist is an array of usesysid values.
+    # We join with pg_user to see which groups the user belongs to.
+    query = """
+    SELECT g.groname
+    FROM pg_group g
+    JOIN pg_user u ON u.usesysid = ANY(g.grolist)
+    WHERE u.usename = %s
+    ORDER BY g.groname;
+    """
+    cursor.execute(query, (target_user,))
+    rows = cursor.fetchall()
+    return rows
 
+def inspect_active_sessions(cursor, target_user: str):
+    """
+    Check stv_sessions to see if the user currently has an active session.
+    """
+    query = """
+    SELECT 
+        process,
+        user_name,
+        db_name,
+        starttime,
+        timeout_sec
+    FROM stv_sessions
+    WHERE user_name = %s
+    ORDER BY starttime DESC;
+    """
+    cursor.execute(query, (target_user,))
+    rows = cursor.fetchall()
+    return rows
+
+def inspect_stored_procs(cursor, target_user: str):
+    """
+    List stored procedures owned by the user. Redshift has 'svv_procedures' or
+    'information_schema.routines', but usage differs by version/permissions.
+    """
+    # Attempt a query using svv_procedures (available in Redshift).
+    # If your Redshift version doesn’t have it, adapt accordingly.
+    query = """
+    SELECT
+            p.identity_name,
+            p.function_name,
+            r.schema_name,
+            function_type,
+            p.privilege_type,
+            admin_option
+    FROM svv_redshift_functions r
+    JOIN svv_function_privileges p ON r.function_name = p.function_name
+    WHERE p.identity_name = %s
+    ORDER BY r.database_name, r.function_name;
+    """
+    cursor.execute(query, (target_user,))
+    rows = cursor.fetchall()
+    return rows
+
+def inspect_other_logs(cursor, target_user: str, limit=1000):
+    """
+    Dump any additional log data for the user from (for example) stl_querytext,
+    stl_error, or stl_ddltext. We'll do a generic approach:
+    - This is just an example. Adapt or expand as needed.
+    """
+    # Example: stl_error to find errors thrown by that user.
+    query = f"""
+    SELECT userid,
+           recordtime,
+           errcode,
+           e.process,
+           trim(e.file) as filename,
+           trim(e.pid) as session_id,
+           e.linenum,
+           trim(e.error) as err_reason
+    FROM stl_error e
+    WHERE userid = (
+      SELECT usesysid
+      FROM pg_user
+      WHERE usename = %s
+    )
+    ORDER BY recordtime DESC
+    LIMIT {limit};
+    """
+    cursor.execute(query, (target_user,))
+    rows = cursor.fetchall()
+    return rows
 
 def main():
     parser = argparse.ArgumentParser(
@@ -154,31 +194,29 @@ def main():
     parser.add_argument(
         "--conn",
         required=True,
-        help=(
-            "Redshift connection URI, e.g. redshift://admin@host:5439/dbname "
-            "(password will be prompted)."
-        ),
+        help="Redshift connection URI (password will be prompted)."
     )
     parser.add_argument(
         "--target-user",
         required=True,
         help="Which Redshift user do you want to inspect?",
     )
-
+    parser.add_argument(
+        "--json-out",
+        default=None,
+        help="If specified, write the collected data in JSON format to this file."
+    )
     args = parser.parse_args()
 
     # Parse the connection parameters (minus password)
     conn_params = parse_connection_uri(args.conn)
-
-    # Prompt for password securely
     user_for_prompt = conn_params["user"]
     if not user_for_prompt:
-        print("Error: The connection URI must include a username (e.g. ...//admin@host...).")
+        print("Error: The connection URI must include a username.")
         sys.exit(1)
 
     pw = getpass.getpass(prompt=f"Password for '{user_for_prompt}': ")
 
-    # Connect to Redshift
     try:
         conn = psycopg2.connect(
             host=conn_params["host"],
@@ -187,25 +225,137 @@ def main():
             user=conn_params["user"],
             password=pw,
         )
-        conn.autocommit = True  # Usually safe for read-only queries
+        conn.autocommit = True
     except Exception as e:
         print(f"Failed to connect to Redshift: {e}")
         sys.exit(1)
 
+    data_report = {}
     with conn.cursor() as cur:
         print(f"\nConnected. Inspecting user '{args.target_user}'...\n")
 
-        # 1. Inspect objects owned by the target user
-        inspect_objects_owned_by(cur, args.target_user)
+        # 1) Objects owned by the user
+        owned_objects = inspect_objects_owned_by(cur, args.target_user)
+        data_report["owned_objects"] = [
+            {
+                "schema": row[0],
+                "object_name": row[1],
+                "object_type": row[2]
+            }
+            for row in owned_objects
+        ]
 
-        # 2. Inspect login events
-        inspect_login_events(cur, args.target_user)
+        # 2) Group memberships
+        group_memberships = inspect_group_membership(cur, args.target_user)
+        data_report["group_memberships"] = [row[0] for row in group_memberships]
 
-        # 3. Inspect recent queries
-        inspect_recent_queries(cur, args.target_user)
+        # 3) Active sessions
+        active_sessions = inspect_active_sessions(cur, args.target_user)
+        data_report["active_sessions"] = []
+        for row in active_sessions:
+            data_report["active_sessions"].append({
+                "process": row[0],
+                "user_name": row[1],
+                "db_name": row[2],
+                "start_time": str(row[3]),
+                "query": row[4]
+            })
+
+        # 4) Stored procedures owned by the user
+        stored_procs = inspect_stored_procs(cur, args.target_user)
+        data_report["stored_procedures"] = []
+        for row in stored_procs:
+            data_report["stored_procedures"].append({
+                "identity_name": row[0],
+                "function_name": row[1],
+                "schema_name": row[2],
+                "function_type": row[3],
+                "privilege_type": row[4],
+                "admin_option": row[5]
+            })
+
+        # 5) Recent login events
+        login_events = inspect_login_events(cur, args.target_user)
+        data_report["login_events"] = []
+        for row in login_events:
+            data_report["login_events"].append({
+                "username": row[0],
+                "event": row[1],
+                "remotehost": row[2],
+                "start_time": str(row[3]),
+                "duration": row[4]
+            })
+
+        # 6) Recent queries
+        recent_queries = inspect_recent_queries(cur, args.target_user)
+        data_report["recent_queries"] = []
+        for row in recent_queries:
+            data_report["recent_queries"].append({
+                "query_id": row[0],
+                "query_text": row[1],
+                "start_time": str(row[2]),
+                "end_time": str(row[3])
+            })
+
+        # 7) Other logs (example: stl_error)
+        other_logs = inspect_other_logs(cur, args.target_user)
+        data_report["other_logs"] = []
+        for row in other_logs:
+            data_report["other_logs"].append({
+                "userid": row[0],
+                "recordtime": str(row[1]),
+                "errcode": row[2],
+                "sequence": row[3],
+                "filename": row[4],
+                "session_id": row[5],
+                "line_number": row[6],
+                "err_reason": row[7],
+            })
 
     conn.close()
 
+    # Identify potential blockers for DROP USER
+    # This is separate logic that you can define as "dropping blockers"
+    # e.g. if there are owned_objects, active_sessions, stored_procedures, group memberships
+    dropping_blockers = []
+    if len(data_report["owned_objects"]) > 0:
+        dropping_blockers.append("User owns database objects that must be reassigned or dropped.")
+    if len(data_report["active_sessions"]) > 0:
+        dropping_blockers.append("User has active sessions that must be terminated.")
+    if len(data_report["stored_procedures"]) > 0:
+        dropping_blockers.append("User owns stored procedures; reassign or drop them first.")
+    if len(data_report["group_memberships"]) > 0:
+        dropping_blockers.append("User is a member of some group(s); remove from those groups first.")
+
+    data_report["dropping_blockers"] = dropping_blockers
+
+    # Print to console
+    print("=== Potential Drop-User Blockers ===")
+    if dropping_blockers:
+        for block in dropping_blockers:
+            print(f" - {block}")
+    else:
+        sys.stderr.write("No immediate blockers found. (Still double-check permissions & references.)")
+
+    summary_write_to = sys.stdout
+    if args.json_out:
+        # Write the entire data_report to JSON
+        file = args.json_out
+        # If file is "-" write to stdout
+        if file == "-":
+            print(json.dumps(data_report, indent=2, default=str))
+        else:
+            with open(args.json_out, "w", encoding="utf-8") as f:
+                json.dump(data_report, f, indent=2, default=str)
+        sys.stderr.write(f"\nDetailed report written to '{args.json_out}'\n")
+        summary_write_to = sys.stderr
+
+    # Either way, write a summary to the console
+    summary_write_to.write("\n=== Summary of Collected Data (console preview) ===\n")
+    for k, v in data_report.items():
+        if k == "dropping_blockers":
+            continue
+        summary_write_to.write(f"{k}: {len(v)} record(s)\n")
 
 if __name__ == "__main__":
     main()
