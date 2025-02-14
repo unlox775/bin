@@ -393,14 +393,15 @@ def main():
     # Either way, write a summary to the console
     summary_write_to.write("\n=== Summary of Collected Data (console preview) ===\n")
     for db, report in data_report.items():
+        if db == "dropping_blockers":
+            continue
+
         # If error, the report will be empty, so skip it
         if not report:
             continue
 
         summary_write_to.write(f"\nDatabase: {db}\n")
         for k, v in report.items():
-            if k == "dropping_blockers":
-                continue
             summary_write_to.write(f"- {k}: {len(v)} record(s)\n")
 
 if __name__ == "__main__":
