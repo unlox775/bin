@@ -5,7 +5,8 @@ plus additional data like role memberships, active sessions, stored procs, etc.
 
 Example usage:
   ./redshift_inspect_user \
-    --conn redshift://admin@my-cluster.us-east-1.redshift.amazonaws.com:5439/dev \
+    --conn redshift://admin@my-cluster.us-east-1.redshift.amazonaws.com:5439 \
+    --databases dev,prod \
     --target-user old_employee
 """
 
@@ -21,7 +22,7 @@ def parse_connection_uri(conn_uri: str):
     params = {
         'host': parsed.hostname,
         'port': parsed.port or 5439, 
-        'database': parsed.path.lstrip('/') or 'dev',
+        'database': 'error_no_database',
         'user': parsed.username,
     }
     return params
@@ -194,7 +195,12 @@ def main():
     parser.add_argument(
         "--conn",
         required=True,
-        help="Redshift connection URI (password will be prompted)."
+        help="Redshift connection URI (password will be prompted).  This does NOT use the database part of the URL, even if present.  See the --databases option for that."
+    )
+    parser.add_argument(
+        "--databases",
+        required=False,
+        help="OPTIONAL: Comma-separated list of databases to inspect.  If not specified, all databases will be inspected (this introspection requires that user is allowed to connect to 'dev' database)."
     )
     parser.add_argument(
         "--target-user",
@@ -217,115 +223,149 @@ def main():
 
     pw = getpass.getpass(prompt=f"Password for '{user_for_prompt}': ")
 
-    try:
-        conn = psycopg2.connect(
-            host=conn_params["host"],
-            port=conn_params["port"],
-            dbname=conn_params["database"],
-            user=conn_params["user"],
-            password=pw,
-        )
-        conn.autocommit = True
-    except Exception as e:
-        print(f"Failed to connect to Redshift: {e}")
-        sys.exit(1)
+    # If databases is not specified, connect and get a list of all databases
+    if not args.databases:
+        try:
+            conn = psycopg2.connect(
+                host=conn_params["host"],
+                port=conn_params["port"],
+                dbname="dev",
+                user=conn_params["user"],
+                password=pw,
+            )
+            conn.autocommit = True
+        except Exception as e:
+            print(f"Failed to connect to Redshift database 'postgres': {e}")
+            sys.exit(1)
+
+        with conn.cursor() as cur:
+            cur.execute("SELECT datname FROM pg_database WHERE datname NOT IN ('template0', 'template1');")
+            rows = cur.fetchall()
+            databases = [row[0] for row in rows]
+
+        conn.close()
+    else:
+        databases = args.databases.split(',')
 
     data_report = {}
-    with conn.cursor() as cur:
-        print(f"\nConnected. Inspecting user '{args.target_user}'...\n")
+    for db in databases:
+        conn_params["database"] = db.strip()
+        try:
+            conn = psycopg2.connect(
+                host=conn_params["host"],
+                port=conn_params["port"],
+                dbname=conn_params["database"],
+                user=conn_params["user"],
+                password=pw,
+            )
+            conn.autocommit = True
+        except Exception as e:
+            print(f"Failed to connect to Redshift database '{conn_params['database']}': {e}")
+            continue
 
-        # 1) Objects owned by the user
-        owned_objects = inspect_objects_owned_by(cur, args.target_user)
-        data_report["owned_objects"] = [
-            {
-                "schema": row[0],
-                "object_name": row[1],
-                "object_type": row[2]
-            }
-            for row in owned_objects
-        ]
+        with conn.cursor() as cur:
+            print(f"\nConnected to database '{conn_params['database']}'. Inspecting user '{args.target_user}'...\n")
 
-        # 2) Group memberships
-        group_memberships = inspect_group_membership(cur, args.target_user)
-        data_report["group_memberships"] = [row[0] for row in group_memberships]
+            # Initialize database-specific report
+            db_report = {}
 
-        # 3) Active sessions
-        active_sessions = inspect_active_sessions(cur, args.target_user)
-        data_report["active_sessions"] = []
-        for row in active_sessions:
-            data_report["active_sessions"].append({
-                "process": row[0],
-                "user_name": row[1],
-                "db_name": row[2],
-                "start_time": str(row[3]),
-                "query": row[4]
-            })
+            # 1) Objects owned by the user
+            owned_objects = inspect_objects_owned_by(cur, args.target_user)
+            db_report["owned_objects"] = [
+                {
+                    "schema": row[0],
+                    "object_name": row[1],
+                    "object_type": row[2]
+                }
+                for row in owned_objects
+            ]
 
-        # 4) Stored procedures owned by the user
-        stored_procs = inspect_stored_procs(cur, args.target_user)
-        data_report["stored_procedures"] = []
-        for row in stored_procs:
-            data_report["stored_procedures"].append({
-                "identity_name": row[0],
-                "function_name": row[1],
-                "schema_name": row[2],
-                "function_type": row[3],
-                "privilege_type": row[4],
-                "admin_option": row[5]
-            })
+            # 2) Group memberships
+            group_memberships = inspect_group_membership(cur, args.target_user)
+            db_report["group_memberships"] = [row[0] for row in group_memberships]
 
-        # 5) Recent login events
-        login_events = inspect_login_events(cur, args.target_user)
-        data_report["login_events"] = []
-        for row in login_events:
-            data_report["login_events"].append({
-                "username": row[0],
-                "event": row[1],
-                "remotehost": row[2],
-                "start_time": str(row[3]),
-                "duration": row[4]
-            })
+            # 3) Active sessions
+            active_sessions = inspect_active_sessions(cur, args.target_user)
+            db_report["active_sessions"] = []
+            for row in active_sessions:
+                db_report["active_sessions"].append({
+                    "process": row[0],
+                    "user_name": row[1],
+                    "db_name": row[2],
+                    "start_time": str(row[3]),
+                    "query": row[4]
+                })
 
-        # 6) Recent queries
-        recent_queries = inspect_recent_queries(cur, args.target_user)
-        data_report["recent_queries"] = []
-        for row in recent_queries:
-            data_report["recent_queries"].append({
-                "query_id": row[0],
-                "query_text": row[1],
-                "start_time": str(row[2]),
-                "end_time": str(row[3])
-            })
+            # 4) Stored procedures owned by the user
+            stored_procs = inspect_stored_procs(cur, args.target_user)
+            db_report["stored_procedures"] = []
+            for row in stored_procs:
+                db_report["stored_procedures"].append({
+                    "identity_name": row[0],
+                    "function_name": row[1],
+                    "schema_name": row[2],
+                    "function_type": row[3],
+                    "privilege_type": row[4],
+                    "admin_option": row[5]
+                })
 
-        # 7) Other logs (example: stl_error)
-        other_logs = inspect_other_logs(cur, args.target_user)
-        data_report["other_logs"] = []
-        for row in other_logs:
-            data_report["other_logs"].append({
-                "userid": row[0],
-                "recordtime": str(row[1]),
-                "errcode": row[2],
-                "sequence": row[3],
-                "filename": row[4],
-                "session_id": row[5],
-                "line_number": row[6],
-                "err_reason": row[7],
-            })
+            # 5) Recent login events
+            login_events = inspect_login_events(cur, args.target_user)
+            db_report["login_events"] = []
+            for row in login_events:
+                db_report["login_events"].append({
+                    "username": row[0],
+                    "event": row[1],
+                    "remotehost": row[2],
+                    "start_time": str(row[3]),
+                    "duration": row[4]
+                })
 
-    conn.close()
+            # 6) Recent queries
+            recent_queries = inspect_recent_queries(cur, args.target_user)
+            db_report["recent_queries"] = []
+            for row in recent_queries:
+                db_report["recent_queries"].append({
+                    "query_id": row[0],
+                    "query_text": row[1],
+                    "start_time": str(row[2]),
+                    "end_time": str(row[3])
+                })
+
+            # 7) Other logs (example: stl_error)
+            other_logs = inspect_other_logs(cur, args.target_user)
+            db_report["other_logs"] = []
+            for row in other_logs:
+                db_report["other_logs"].append({
+                    "userid": row[0],
+                    "recordtime": str(row[1]),
+                    "errcode": row[2],
+                    "sequence": row[3],
+                    "filename": row[4],
+                    "session_id": row[5],
+                    "line_number": row[6],
+                    "err_reason": row[7],
+                })
+
+        conn.close()
+
+        # Store the database-specific report
+        data_report[conn_params["database"]] = db_report
+
 
     # Identify potential blockers for DROP USER
     # This is separate logic that you can define as "dropping blockers"
     # e.g. if there are owned_objects, active_sessions, stored_procedures, group memberships
     dropping_blockers = []
-    if len(data_report["owned_objects"]) > 0:
-        dropping_blockers.append("User owns database objects that must be reassigned or dropped.")
-    if len(data_report["active_sessions"]) > 0:
-        dropping_blockers.append("User has active sessions that must be terminated.")
-    if len(data_report["stored_procedures"]) > 0:
-        dropping_blockers.append("User owns stored procedures; reassign or drop them first.")
-    if len(data_report["group_memberships"]) > 0:
-        dropping_blockers.append("User is a member of some group(s); remove from those groups first.")
+    for db, db_data in data_report.items():
+        if len(db_data["owned_objects"]) > 0:
+            dropping_blockers.append(f"User owns database objects in '{db}'; reassign or drop them first.")
+        if len(db_data["active_sessions"]) > 0:
+            dropping_blockers.append(f"User has active sessions in '{db}'; terminate them first.")
+        if len(db_data["stored_procedures"]) > 0:
+            dropping_blockers.append(f"User owns stored procedures in '{db}'; reassign or drop them first.")
+        if len(db_data["group_memberships"]) > 0:
+            dropping_blockers.append(f"User is a member of some group(s) in '{db}'; remove from those groups first.")
 
     data_report["dropping_blockers"] = dropping_blockers
 
@@ -352,10 +392,16 @@ def main():
 
     # Either way, write a summary to the console
     summary_write_to.write("\n=== Summary of Collected Data (console preview) ===\n")
-    for k, v in data_report.items():
-        if k == "dropping_blockers":
+    for db, report in data_report.items():
+        # If error, the report will be empty, so skip it
+        if not report:
             continue
-        summary_write_to.write(f"{k}: {len(v)} record(s)\n")
+
+        summary_write_to.write(f"\nDatabase: {db}\n")
+        for k, v in report.items():
+            if k == "dropping_blockers":
+                continue
+            summary_write_to.write(f"- {k}: {len(v)} record(s)\n")
 
 if __name__ == "__main__":
     main()
