@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# gstash_restore — pop a named stash, refuse on bad args or ambiguities,
+# list matching stashes if ambiguous, verify success.
+
+if [ "$#" -ne 1 ]; then
+  echo "Usage: gstash_restore <stash-name>"
+  exit 1
+fi
+NAME="$1"
+
+# ensure we’re in a git repo
+if ! git rev-parse --git-dir &>/dev/null; then
+  echo "Error: not a git repository."
+  exit 1
+fi
+
+# find stash entries whose message matches exactly our name
+matches=()
+while IFS= read -r line; do
+  ref=${line%%:*}
+  msg=${line#*: }
+  # strip "On <branch>: " if present
+  clean_msg=${msg#*": "}
+  if [[ "$clean_msg" == "$NAME" ]]; then
+    matches+=("$ref")
+  fi
+done < <(git stash list --format="%gd:%s")
+
+if [ "${#matches[@]}" -eq 0 ]; then
+  echo "Error: no stash found named '$NAME'."
+  exit 1
+elif [ "${#matches[@]}" -gt 1 ]; then
+  echo "Error: multiple stashes named '$NAME':"
+  git stash list | grep -F ": $NAME"
+  exit 1
+fi
+
+STASH_REF=${matches[0]}
+echo "Restoring stash $STASH_REF..."
+git stash pop "$STASH_REF" || exit 1
+echo "✔ Restored '$NAME'."

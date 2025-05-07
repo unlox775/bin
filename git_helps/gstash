@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# gstash — create a named stash (including untracked), refuse on bad args or no-repo,
+# list files to be stashed, verify resulting working directory is clean.
+
+if [ "$#" -ne 1 ]; then
+  echo "Usage: gstash <stash-name>"
+  exit 1
+fi
+NAME="$1"
+
+# ensure we’re in a git repo
+if ! git rev-parse --git-dir &>/dev/null; then
+  echo "Error: not a git repository."
+  exit 1
+fi
+
+# capture and show what will be stashed
+FILES=$(git status --short)
+if [ -z "$FILES" ]; then
+  echo "Nothing to stash."
+  exit 0
+fi
+
+echo "The following files will be stashed:"
+echo "$FILES"
+echo
+
+# stash everything (tracked + untracked)
+git stash push -u -m "$NAME" || exit 1
+
+# verify clean
+REMAINING=$(git status --short)
+if [ -z "$REMAINING" ]; then
+  echo "✔ Stash '$NAME' created; working directory is clean."
+  exit 0
+else
+  echo "Error: working directory not clean after stash:"
+  echo "$REMAINING"
+  exit 1
+fi
