@@ -1,41 +1,195 @@
 #!/usr/bin/env python3
 
 import boto3
+import botocore.exceptions
 import sys
 import os
+import argparse
+import time
+import json
+from collections import defaultdict
 
-# Check if the CLI arguments are provided and set the region and profile variables accordingly.
-# argv[0] is always the script name, so we start checking from argv[1].
+# Global cache for CloudFormation data to avoid fetching for each role
+cfn_cache = {
+    'stacks': None,
+    'resources': {},
+    'created_roles': {},
+    'execution_roles': {},
+    'resource_roles': {},
+    'last_update': 0
+}
 
-# Read the first command line arg as the region name; default to 'us-east-1'
-region_name = sys.argv[1] if len(sys.argv) > 1 else 'us-east-1'
+def parse_args():
+    parser = argparse.ArgumentParser(description='List AWS IAM roles and their associated resources')
+    parser.add_argument('role_names', nargs='*',
+                        help='Specific IAM role names to inspect (optional, if not provided all roles are listed)')
+    parser.add_argument('--profile', '-p',
+                        help='AWS profile name (if not provided, AWS_PROFILE environment variable will be used)')
+    parser.add_argument('--region', '-r', default='us-east-1',
+                        help='AWS region for regional resources (default: us-east-1)')
+    parser.add_argument('--help-profiles', action='store_true',
+                        help='Show information about available AWS profiles')
+    parser.add_argument('--timing', '-t', action='store_true',
+                        help='Show execution time for each major operation')
+    parser.add_argument('--skip-cloudformation', '-s', action='store_true',
+                        help='Skip CloudFormation checks for faster performance')
+    return parser.parse_args()
 
-# Read the second command line arg as the profile name; default to 'default'
-profile_name = sys.argv[2] if len(sys.argv) > 2 else 'default'
-print(f"Using region: {region_name}, profile: {profile_name}")
+args = parse_args()
+
+# Check if user requested help with profiles
+if args.help_profiles:
+    print("AWS Profile Help:")
+    print("----------------")
+    print("AWS profiles are configured in ~/.aws/credentials and ~/.aws/config files.")
+    print("\nTo list available profiles, run:")
+    print("  aws configure list-profiles")
+    print("\nTo create or update a profile, run:")
+    print("  aws configure --profile PROFILE_NAME")
+    print("\nSample ~/.aws/credentials file:")
+    print("  [default]")
+    print("  aws_access_key_id = YOUR_ACCESS_KEY")
+    print("  aws_secret_access_key = YOUR_SECRET_KEY")
+    print("\nSample ~/.aws/config file:")
+    print("  [profile default]")
+    print("  region = us-east-1")
+    print("  output = json")
+    sys.exit(0)
+
+region_name = args.region
+profile_name = args.profile or os.environ.get('AWS_PROFILE')
+
+if not profile_name:
+    print("Error: AWS profile must be specified either with --profile option or by setting AWS_PROFILE environment variable.")
+    sys.exit(1)
+
+print(f"Using profile: {profile_name}, region: {region_name} (for regional resources)")
 # set AWS_PROFILE and AWS_REGION environment variables, so aws-google gets them
 os.environ['AWS_PROFILE'] = profile_name
 os.environ['AWS_REGION'] = region_name
 
-session = boto3.Session(profile_name=profile_name, region_name=region_name)
+try:
+    # First try to create session with provided profile
+    session = boto3.Session(profile_name=profile_name, region_name=region_name)
+except botocore.exceptions.ProfileNotFound:
+    print(f"Warning: AWS profile '{profile_name}' not found. Trying with default credentials.")
+    # Try without profile_name, which will use environment variables or IAM role
+    session = boto3.Session(region_name=region_name)
+
+def initialize_cfn_cache():
+    """
+    Initialize the CloudFormation cache to avoid fetching all stacks for each role.
+    This optimization significantly improves performance when checking multiple roles.
+    """
+    global cfn_cache
+    
+    # Use cached data if it's less than 5 minutes old
+    if cfn_cache['stacks'] is not None and time.time() - cfn_cache['last_update'] < 300:
+        return
+    
+    print("Initializing CloudFormation cache...", end='', flush=True)
+    start_time = time.time()
+    
+    cfn = session.client('cloudformation')
+    account_id = session.client('sts').get_caller_identity().get('Account')
+    
+    # Clear existing cache
+    cfn_cache['stacks'] = []
+    cfn_cache['resources'] = {}
+    cfn_cache['created_roles'] = defaultdict(list)
+    cfn_cache['execution_roles'] = defaultdict(list)
+    cfn_cache['resource_roles'] = defaultdict(list)
+    
+    # Fetch all stacks
+    try:
+        paginator = cfn.get_paginator('list_stacks')
+        for page in paginator.paginate(StackStatusFilter=['CREATE_COMPLETE', 'UPDATE_COMPLETE', 'UPDATE_ROLLBACK_COMPLETE']):
+            cfn_cache['stacks'].extend(page['StackSummaries'])
+    except botocore.exceptions.ClientError as e:
+        print(f"\nWarning: Could not list CloudFormation stacks: {e}")
+        return
+    
+    # Process each stack to find roles
+    for stack in cfn_cache['stacks']:
+        stack_name = stack['StackName']
+        try:
+            # Fetch resources for the stack
+            resources = []
+            try:
+                paginator = cfn.get_paginator('list_stack_resources')
+                for page in paginator.paginate(StackName=stack_name):
+                    resources.extend(page['StackResourceSummaries'])
+            except botocore.exceptions.ClientError:
+                continue
+                
+            cfn_cache['resources'][stack_name] = resources
+            
+            # Look for IAM roles in the stack
+            for resource in resources:
+                if resource.get('ResourceType') == 'AWS::IAM::Role':
+                    role_name = resource.get('PhysicalResourceId')
+                    if role_name:
+                        # This role was created by this stack
+                        cfn_cache['created_roles'][role_name].append(stack_name)
+                
+                # Check for resources that use roles (like Lambda functions)
+                if resource.get('ResourceType') == 'AWS::Lambda::Function':
+                    try:
+                        lambda_client = session.client('lambda')
+                        function_name = resource.get('PhysicalResourceId')
+                        if function_name:
+                            function = lambda_client.get_function(FunctionName=function_name)
+                            if 'Role' in function['Configuration']:
+                                role_arn = function['Configuration']['Role']
+                                role_name = role_arn.split('/')[-1]
+                                # This role is used by a resource in this stack
+                                cfn_cache['resource_roles'][role_name].append(f"{stack_name} (Lambda)")
+                    except botocore.exceptions.ClientError:
+                        continue
+            
+            # Check if the stack has an execution role
+            try:
+                stack_details = cfn.describe_stacks(StackName=stack_name)['Stacks'][0]
+                if 'RoleARN' in stack_details:
+                    role_arn = stack_details['RoleARN']
+                    role_name = role_arn.split('/')[-1]
+                    # This role is used as the stack's execution role
+                    cfn_cache['execution_roles'][role_name].append(stack_name)
+            except (botocore.exceptions.ClientError, KeyError, IndexError):
+                continue
+                
+        except Exception as e:
+            print(f"\nWarning: Error processing stack {stack_name}: {e}")
+            continue
+    
+    cfn_cache['last_update'] = time.time()
+    print(f" done in {time.time() - start_time:.2f} seconds", flush=True)
 
 def get_associated_resources(role_name): 
+    timings = {}
     ec2 = session.resource('ec2')
     ec2_client = session.client('ec2')
     lambda_client = session.client('lambda')
     ecs = session.client('ecs')
     iam = session.client('iam')
+    cfn = session.client('cloudformation')
     
     # EC2 Instances with the specified IAM role
-    instances = list(ec2.instances.filter(Filters=[{'Name': 'iam-instance-profile.arn', 'Values': [f"arn:aws:iam::{session.client('sts').get_caller_identity().get('Account')}:instance-profile/{role_name}"]}]))
+    start_time = time.time()
+    account_id = session.client('sts').get_caller_identity().get('Account')
+    instances = list(ec2.instances.filter(Filters=[{'Name': 'iam-instance-profile.arn', 'Values': [f"arn:aws:iam::{account_id}:instance-profile/{role_name}"]}]))
     running_instances = [inst.id for inst in instances if inst.state['Name'] == 'running']
     stopped_instances = [inst.id for inst in instances if inst.state['Name'] == 'stopped']
-
+    timings['EC2'] = time.time() - start_time
+    
     # Lambda Functions
+    start_time = time.time()
     functions = lambda_client.list_functions()
     associated_functions = [func['FunctionName'] for func in functions['Functions'] if func.get('Role', '').endswith(f"/{role_name}")]
+    timings['Lambda'] = time.time() - start_time
 
     # ECS Tasks and Services
+    start_time = time.time()
     ecs_tasks = []
     ecs_services = []
     for cluster_arn in ecs.list_clusters()['clusterArns']:
@@ -50,11 +204,62 @@ def get_associated_resources(role_name):
             service = ecs.describe_services(cluster=cluster_arn, services=[service_arn])['services'][0]
             if service.get('taskDefinition', '').endswith(f"/{role_name}"):
                 ecs_services.append(service_arn)
+    timings['ECS'] = time.time() - start_time
 
     # Policies and attached entities (users, groups)
-    attached_users = iam.list_entities_for_policy(PolicyArn=f"arn:aws:iam::aws:policy/{role_name}", EntityFilter="User")['PolicyUsers']
-    attached_groups = iam.list_entities_for_policy(PolicyArn=f"arn:aws:iam::aws:policy/{role_name}", EntityFilter="Group")['PolicyGroups']
+    start_time = time.time()
+    attached_users = []
+    attached_groups = []
+    try:
+        # This is for AWS managed policies
+        attached_users = iam.list_entities_for_policy(PolicyArn=f"arn:aws:iam::aws:policy/{role_name}", EntityFilter="User")['PolicyUsers']
+        attached_groups = iam.list_entities_for_policy(PolicyArn=f"arn:aws:iam::aws:policy/{role_name}", EntityFilter="Group")['PolicyGroups']
+    except botocore.exceptions.ClientError:
+        # Skip if the policy doesn't exist or isn't attachable
+        pass
+    timings['IAM Policy'] = time.time() - start_time
 
+    # CloudFormation stacks - use cache for better performance
+    start_time = time.time()
+    
+    created_by_stacks = []
+    execution_role_for_stacks = []
+    used_by_resources_in_stacks = []
+    cfn_detail_timings = {}
+    
+    # Skip CloudFormation checks if --skip-cloudformation is used
+    if not args.skip_cloudformation:
+        # First make sure cache is initialized
+        initialize_cfn_cache()
+        
+        # Track detailed timings for CloudFormation operations
+        cfn_detail_timings = {}
+
+    # Get relationships from the cache
+    cache_lookup_time = time.time()
+    
+    # Check if this role was created by a CloudFormation stack
+    if role_name in cfn_cache['created_roles']:
+        created_by_stacks = cfn_cache['created_roles'][role_name]
+    
+    # Check if this role is used as a stack execution role
+    if role_name in cfn_cache['execution_roles']:
+        execution_role_for_stacks = cfn_cache['execution_roles'][role_name]
+    
+    # Check if this role is used by resources in stacks
+    if role_name in cfn_cache['resource_roles']:
+        used_by_resources_in_stacks = cfn_cache['resource_roles'][role_name]
+    
+    cfn_detail_timings['cache_lookup'] = time.time() - cache_lookup_time
+    
+    # Combine all stacks for backward compatibility
+    cfn_stacks = list(set(created_by_stacks + execution_role_for_stacks + used_by_resources_in_stacks))
+    
+    timings['CloudFormation'] = time.time() - start_time
+    # Add detailed timings
+    for key, value in cfn_detail_timings.items():
+        timings[f'CF:{key}'] = value
+    
     # Collect resource associations
     associated_resources = {
         'EC2(Running)': len(running_instances),
@@ -62,43 +267,97 @@ def get_associated_resources(role_name):
         'Lambda': len(associated_functions),
         'ECS_Tasks': len(ecs_tasks),
         'ECS_Services': len(ecs_services),
+        'CloudFormation': len(cfn_stacks),
         'Users': len(attached_users),
         'Groups': len(attached_groups)
     }
 
-    return associated_resources, running_instances, stopped_instances, associated_functions, ecs_tasks, ecs_services
+    return associated_resources, running_instances, stopped_instances, associated_functions, ecs_tasks, ecs_services, cfn_stacks, created_by_stacks, execution_role_for_stacks, used_by_resources_in_stacks, timings
 
 def main():
-    iam = session.client('iam')
-    roles = iam.list_roles()['Roles']
+    try:
+        iam = session.client('iam')
+        # Fetch all IAM roles with pagination
+        paginator = iam.get_paginator('list_roles')
+        roles = []
+        for page in paginator.paginate():
+            roles.extend(page['Roles'])
 
-    for role in roles:
-        role_name = role['RoleName']
-        print(f"\nRole Name: {role_name}")
-        print(f"Role ARN: {role['Arn']}")
-        description = role.get('Description', 'No description available')
-        print(f"Description: {description}")
+        if not roles:
+            print("No IAM roles found in this account.")
+            return
+        
+        # cache CloudFormation data for performance
+        if not args.skip_cloudformation:
+            initialize_cfn_cache()
+        
+        # Filter roles by names if specified
+        if args.role_names:
+            filtered = []
+            for name in args.role_names:
+                matches = [role for role in roles if name.lower() in role['RoleName'].lower()]
+                if matches:
+                    filtered.extend(matches)
+                else:
+                    print(f"No IAM roles found matching '{name}'")
+            # remove duplicates, preserve order
+            unique = []
+            seen = set()
+            for r in filtered:
+                if r['RoleName'] not in seen:
+                    seen.add(r['RoleName'])
+                    unique.append(r)
+            roles = unique
+            if not roles:
+                return
+            
+        for role in roles:
+            role_name = role['RoleName']
+            print(f"\nRole Name: {role_name}")
+            print(f"Role ARN: {role['Arn']}")
+            description = role.get('Description', 'No description available')
+            print(f"Description: {description}")
 
-        associated_resources, running_instances, stopped_instances, associated_functions, ecs_tasks, ecs_services = get_associated_resources(role_name)
+            associated_resources, running_instances, stopped_instances, associated_functions, ecs_tasks, ecs_services, cfn_stacks, created_by_stacks, execution_role_for_stacks, used_by_resources_in_stacks, timings = get_associated_resources(role_name)
 
-        if sum(associated_resources.values()) > 0:
-            print("  <=== Associated Resources:")
-            if len(running_instances) > 0:
-                print(f"    EC2(Running): {len(running_instances)} instance(s) {', '.join(running_instances[:3])}")
-            if len(stopped_instances) > 0:
-                print(f"    EC2(Stopped): {len(stopped_instances)} instance(s) {', '.join(stopped_instances[:3])}")
-            if len(associated_functions) > 0:
-                print(f"    Lambda: {len(associated_functions)} function(s) {', '.join(associated_functions[:3])}")
-            if len(ecs_tasks) > 0:
-                print(f"    ECS_Tasks: {len(ecs_tasks)} task(s) {', '.join(ecs_tasks[:3])}")
-            if len(ecs_services) > 0:
-                print(f"    ECS_Services: {len(ecs_services)} service(s) {', '.join(ecs_services[:3])}")
-            if associated_resources['Users'] > 0:
-                print(f"    IAM Users: {associated_resources['Users']} user(s)")
-            if associated_resources['Groups'] > 0:
-                print(f"    IAM Groups: {associated_resources['Groups']} group(s)")
+            if sum(associated_resources.values()) > 0:
+                print("  <=== Associated Resources:")
+                if len(running_instances) > 0:
+                    print(f"    EC2(Running): {len(running_instances)} instance(s) {', '.join(running_instances)}")
+                if len(stopped_instances) > 0:
+                    print(f"    EC2(Stopped): {len(stopped_instances)} instance(s) {', '.join(stopped_instances)}")
+                if len(associated_functions) > 0:
+                    print(f"    Lambda: {len(associated_functions)} function(s) {', '.join(associated_functions)}")
+                if len(ecs_tasks) > 0:
+                    print(f"    ECS_Tasks: {len(ecs_tasks)} task(s) {', '.join(ecs_tasks)}")
+                if len(ecs_services) > 0:
+                    print(f"    ECS_Services: {len(ecs_services)} service(s) {', '.join(ecs_services)}")
+                # CloudFormation relationships - show only if not skipped
+                if not args.skip_cloudformation:
+                    if len(created_by_stacks) > 0:
+                        print(f"    Created by CloudFormation: {len(created_by_stacks)} stack(s) {', '.join(created_by_stacks)}")
+                    if len(execution_role_for_stacks) > 0:
+                        print(f"    Stack Execution Role for: {len(execution_role_for_stacks)} stack(s) {', '.join(execution_role_for_stacks)}")
+                    if len(used_by_resources_in_stacks) > 0:
+                        print(f"    Used by Resources in: {len(used_by_resources_in_stacks)} stack(s) {', '.join(used_by_resources_in_stacks)}")
+                if associated_resources['Users'] > 0:
+                    print(f"    IAM Users: {associated_resources['Users']} user(s)")
+                if associated_resources['Groups'] > 0:
+                    print(f"    IAM Groups: {associated_resources['Groups']} group(s)")
+            
+            if args.timing:
+                print("\n  <=== Operation Timings:")
+                for operation, duration in sorted(timings.items(), key=lambda x: x[1], reverse=True):
+                    # Skip CloudFormation-related timing entries if CloudFormation is skipped
+                    if args.skip_cloudformation and ('CloudFormation' in operation or 'CF:' in operation):
+                        continue
+                    print(f"    {operation}: {duration:.2f} seconds")
 
-        print("----------------------------------------------------------", flush=True)
+            print("----------------------------------------------------------", flush=True)
+    except Exception as e:
+        print(f"Error: {e}")
+        print("Please ensure your AWS credentials are properly configured and the profile exists.")
+        sys.exit(1)
 
 if __name__ == '__main__':
     main()
