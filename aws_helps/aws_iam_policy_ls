@@ -1,0 +1,154 @@
+#!/usr/bin/env python3
+import boto3
+import botocore.exceptions
+import argparse
+import os
+import sys
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description='List custom IAM policies and their usage attachments and boundaries'
+    )
+    parser.add_argument(
+        '--profile', '-p',
+        help='AWS profile name (or set AWS_PROFILE)'
+    )
+    parser.add_argument(
+        '--region', '-r', default='us-east-1',
+        help='AWS region (default: us-east-1)'
+    )
+    parser.add_argument(
+        'policy_names', nargs='*',
+        help='Specific IAM policy names to inspect (optional, if not provided all policies are listed)'
+    )
+    parser.add_argument(
+        '--timing', '-t', action='store_true',
+        help='Show execution time for major operations'
+    )
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
+    show_timing = args.timing
+    profile = args.profile or os.environ.get('AWS_PROFILE')
+    if not profile:
+        print('Error: AWS profile must be set via --profile or AWS_PROFILE')
+        sys.exit(1)
+    os.environ['AWS_PROFILE'] = profile
+    os.environ['AWS_REGION'] = args.region
+
+    session = boto3.Session(profile_name=profile, region_name=args.region)
+    iam = session.client('iam')
+
+    # Fetch all custom (local) policies
+    try:
+        if show_timing:
+            import time
+            start_policies = time.time()
+        paginator = iam.get_paginator('list_policies')
+        policies = []
+        for page in paginator.paginate(Scope='Local'):
+            policies.extend(page['Policies'])
+        if show_timing:
+            print(f"Policies listing took {time.time() - start_policies:.2f} seconds")
+    except botocore.exceptions.ClientError as e:
+        print(f"Error listing policies: {e}")
+        sys.exit(1)
+
+    # Filter by provided policy names
+    if args.policy_names:
+        policies = [p for p in policies if p['PolicyName'] in args.policy_names]
+
+    # Pre-fetch all roles and users for boundary checks
+    # Pre-fetch all roles for boundary checks (paginated)
+    all_roles = []
+    role_paginator = iam.get_paginator('list_roles')
+    for page in role_paginator.paginate():
+        all_roles.extend(page.get('Roles', []))
+    # Pre-fetch all users for boundary checks (paginated)
+    all_users = []
+    user_paginator = iam.get_paginator('list_users')
+    for page in user_paginator.paginate():
+        all_users.extend(page.get('Users', []))
+
+    for policy in policies:
+        name = policy['PolicyName']
+        arn = policy['Arn']
+        desc = policy.get('Description', '')
+        print(f"Policy: {name}\n  ARN: {arn}\n  Description: {desc}")
+
+        # Determine attachments via explicit APIs
+        policy_groups = []
+        # Groups still use list_entities_for_policy
+        try:
+            grp_paginator = iam.get_paginator('list_entities_for_policy')
+            for page in grp_paginator.paginate(PolicyArn=arn):
+                for g in page.get('PolicyGroups', []):
+                    policy_groups.append(g['GroupName'])
+        except botocore.exceptions.ClientError as e:
+            print(f"  Error listing group attachments: {e}\n")
+        # Roles with permission policy attached (paginated)
+        policy_roles = []
+        role_attach_paginator = iam.get_paginator('list_attached_role_policies')
+        for r in all_roles:
+            try:
+                for page in role_attach_paginator.paginate(RoleName=r['RoleName']):
+                    for p in page.get('AttachedPolicies', []):
+                        if p.get('PolicyArn') == arn:
+                            policy_roles.append(r['RoleName'])
+                            raise StopIteration
+            except StopIteration:
+                continue
+            except botocore.exceptions.ClientError:
+                continue
+        # Users with permission policy attached (paginated)
+        policy_users = []
+        user_attach_paginator = iam.get_paginator('list_attached_user_policies')
+        for u in all_users:
+            try:
+                for page in user_attach_paginator.paginate(UserName=u['UserName']):
+                    for p in page.get('AttachedPolicies', []):
+                        if p.get('PolicyArn') == arn:
+                            policy_users.append(u['UserName'])
+                            raise StopIteration
+            except StopIteration:
+                continue
+            except botocore.exceptions.ClientError:
+                continue
+
+        # Permissions boundaries: roles and users
+        boundary_roles = [r['RoleName'] for r in all_roles
+                          if (r.get('PermissionsBoundary') or {}).get('PermissionsBoundaryArn') == arn]
+        boundary_users = []
+        for u in all_users:
+            try:
+                detail = iam.get_user(UserName=u['UserName'])['User']
+                pb = detail.get('PermissionsBoundary')
+                if pb and pb.get('PermissionsBoundaryArn') == arn:
+                    boundary_users.append(u['UserName'])
+            except botocore.exceptions.ClientError:
+                continue
+
+        # Filter out boundary-only entities from attachments
+        attached_roles = [r for r in policy_roles if r not in boundary_roles]
+        attached_users = [u for u in policy_users if u not in boundary_users]
+
+        # Print permission-policy attachments
+        if attached_roles:
+            print(f"  Roles with permissions policy attached: {', '.join(attached_roles)}")
+        if attached_users:
+            print(f"  Users with permissions policy attached: {', '.join(attached_users)}")
+        if policy_groups:
+            print(f"  Groups with permissions policy attached: {', '.join(policy_groups)}")
+
+        # Print permission boundaries
+        if boundary_roles:
+            print(f"  Roles with permissions boundary attached: {', '.join(boundary_roles)}")
+        if boundary_users:
+            print(f"  Users with permissions boundary attached: {', '.join(boundary_users)}")
+
+        print('-' * 60)
+
+if __name__ == '__main__':
+    main()
