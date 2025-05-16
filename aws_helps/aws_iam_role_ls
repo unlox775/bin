@@ -83,8 +83,8 @@ def initialize_cfn_cache():
     """
     global cfn_cache
     
-    # Use cached data if it's less than 5 minutes old
-    if cfn_cache['stacks'] is not None and time.time() - cfn_cache['last_update'] < 300:
+    # Use cached data if it's less than an hour old
+    if cfn_cache['stacks'] is not None and time.time() - cfn_cache['last_update'] < 3600:
         return
     
     print("Initializing CloudFormation cache...", end='', flush=True)

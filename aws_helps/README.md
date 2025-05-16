@@ -11,6 +11,7 @@ This directory contains various AWS command-line helper scripts. Below is a summ
 - `aws_ec2_ssm_connect`: Connect to EC2 instances via AWS SSM Session Manager.
 - `aws_eni_ls`: List network interfaces (ENIs) and their details.
 - `aws_iam_role_ls`: List IAM roles and associated AWS resources (EC2, Lambda, ECS, CloudFormation, etc.).
+- `aws_iam_policy_ls`: List IAM policies and their entity attachments (users, roles, groups), distinguishing between permissions policies and permission boundaries.
 - `aws_log_export`: Export AWS CloudWatch logs to local files.
 - `aws_public_ip_ls`: List public IP addresses allocated in the account.
 - `aws_rds_mysql_ssm_port_forward`: Set up SSM port forwarding to RDS MySQL instances.

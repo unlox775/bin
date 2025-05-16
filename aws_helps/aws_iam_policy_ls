@@ -51,7 +51,7 @@ def main():
         for page in paginator.paginate(Scope='Local'):
             policies.extend(page['Policies'])
         if show_timing:
-            print(f"Policies listing took {time.time() - start_policies:.2f} seconds")
+            print(f"Policies listing took {time.time() - start_policies:.2f} seconds", flush=True)
     except botocore.exceptions.ClientError as e:
         print(f"Error listing policies: {e}")
         sys.exit(1)
@@ -62,93 +62,103 @@ def main():
 
     # Pre-fetch all roles and users for boundary checks
     # Pre-fetch all roles for boundary checks (paginated)
+    if show_timing:
+        start_roles = time.time()
     all_roles = []
     role_paginator = iam.get_paginator('list_roles')
     for page in role_paginator.paginate():
         all_roles.extend(page.get('Roles', []))
+    if show_timing:
+        print(f"Roles listing took {time.time() - start_roles:.2f} seconds", flush=True)
     # Pre-fetch all users for boundary checks (paginated)
+    if show_timing:
+        start_users = time.time()
     all_users = []
     user_paginator = iam.get_paginator('list_users')
     for page in user_paginator.paginate():
         all_users.extend(page.get('Users', []))
+    if show_timing:
+        print(f"Users listing took {time.time() - start_users:.2f} seconds", flush=True)
 
+    # Build permission boundary cache once
+    if show_timing:
+        start_boundary = time.time()
+    boundary_roles_map = {}
+    for r in all_roles:
+        try:
+            detail = iam.get_role(RoleName=r['RoleName'])['Role']
+            pb = detail.get('PermissionsBoundary')
+            if pb:
+                boundary_roles_map.setdefault(pb['PermissionsBoundaryArn'], []).append(r['RoleName'])
+        except botocore.exceptions.ClientError:
+            pass
+    if show_timing:
+        print(f"Roles boundary cache took {time.time() - start_boundary:.2f} seconds", flush=True)
+        start_boundary = time.time()
+    boundary_users_map = {}
+    for u in all_users:
+        try:
+            detail = iam.get_user(UserName=u['UserName'])['User']
+            pb = detail.get('PermissionsBoundary')
+            if pb:
+                boundary_users_map.setdefault(pb['PermissionsBoundaryArn'], []).append(u['UserName'])
+        except botocore.exceptions.ClientError:
+            pass
+    if show_timing:
+        print(f"Users boundary cache took {time.time() - start_boundary:.2f} seconds", flush=True)
+
+    # Time average per policy time
+    if show_timing:
+        start_policy_time = time.time()
+        policy_count = len(policies)
     for policy in policies:
         name = policy['PolicyName']
         arn = policy['Arn']
         desc = policy.get('Description', '')
-        print(f"Policy: {name}\n  ARN: {arn}\n  Description: {desc}")
+        print(f"Policy: {name}\n  ARN: {arn}\n  Description: {desc}", flush=True)
 
-        # Determine attachments via explicit APIs
-        policy_groups = []
-        # Groups still use list_entities_for_policy
-        try:
-            grp_paginator = iam.get_paginator('list_entities_for_policy')
-            for page in grp_paginator.paginate(PolicyArn=arn):
-                for g in page.get('PolicyGroups', []):
-                    policy_groups.append(g['GroupName'])
-        except botocore.exceptions.ClientError as e:
-            print(f"  Error listing group attachments: {e}\n")
-        # Roles with permission policy attached (paginated)
+        # Fetch all attachments for the policy (roles, users, groups)
         policy_roles = []
-        role_attach_paginator = iam.get_paginator('list_attached_role_policies')
-        for r in all_roles:
-            try:
-                for page in role_attach_paginator.paginate(RoleName=r['RoleName']):
-                    for p in page.get('AttachedPolicies', []):
-                        if p.get('PolicyArn') == arn:
-                            policy_roles.append(r['RoleName'])
-                            raise StopIteration
-            except StopIteration:
-                continue
-            except botocore.exceptions.ClientError:
-                continue
-        # Users with permission policy attached (paginated)
         policy_users = []
-        user_attach_paginator = iam.get_paginator('list_attached_user_policies')
-        for u in all_users:
-            try:
-                for page in user_attach_paginator.paginate(UserName=u['UserName']):
-                    for p in page.get('AttachedPolicies', []):
-                        if p.get('PolicyArn') == arn:
-                            policy_users.append(u['UserName'])
-                            raise StopIteration
-            except StopIteration:
-                continue
-            except botocore.exceptions.ClientError:
-                continue
+        policy_groups = []
+        try:
+            ent_paginator = iam.get_paginator('list_entities_for_policy')
+            for page in ent_paginator.paginate(PolicyArn=arn):
+                policy_roles.extend([r['RoleName'] for r in page.get('PolicyRoles', [])])
+                policy_users.extend([u['UserName'] for u in page.get('PolicyUsers', [])])
+                policy_groups.extend([g['GroupName'] for g in page.get('PolicyGroups', [])])
+        except botocore.exceptions.ClientError as e:
+            print(f"  Error listing entities: {e}\n", flush=True)
+            continue
 
-        # Permissions boundaries: roles and users
-        boundary_roles = [r['RoleName'] for r in all_roles
-                          if (r.get('PermissionsBoundary') or {}).get('PermissionsBoundaryArn') == arn]
-        boundary_users = []
-        for u in all_users:
-            try:
-                detail = iam.get_user(UserName=u['UserName'])['User']
-                pb = detail.get('PermissionsBoundary')
-                if pb and pb.get('PermissionsBoundaryArn') == arn:
-                    boundary_users.append(u['UserName'])
-            except botocore.exceptions.ClientError:
-                continue
+        # Use cached permission boundaries
+        boundary_roles = boundary_roles_map.get(arn, [])
+        boundary_users = boundary_users_map.get(arn, [])
 
-        # Filter out boundary-only entities from attachments
+        # Filter out boundary-only entities
         attached_roles = [r for r in policy_roles if r not in boundary_roles]
         attached_users = [u for u in policy_users if u not in boundary_users]
 
         # Print permission-policy attachments
         if attached_roles:
-            print(f"  Roles with permissions policy attached: {', '.join(attached_roles)}")
+            print(f"  Roles with permissions policy attached: {', '.join(attached_roles)}", flush=True)
         if attached_users:
-            print(f"  Users with permissions policy attached: {', '.join(attached_users)}")
+            print(f"  Users with permissions policy attached: {', '.join(attached_users)}", flush=True)
         if policy_groups:
-            print(f"  Groups with permissions policy attached: {', '.join(policy_groups)}")
+            print(f"  Groups with permissions policy attached: {', '.join(policy_groups)}", flush=True)
 
         # Print permission boundaries
         if boundary_roles:
-            print(f"  Roles with permissions boundary attached: {', '.join(boundary_roles)}")
+            print(f"  Roles with permissions boundary attached: {', '.join(boundary_roles)}", flush=True)
         if boundary_users:
-            print(f"  Users with permissions boundary attached: {', '.join(boundary_users)}")
+            print(f"  Users with permissions boundary attached: {', '.join(boundary_users)}", flush=True)
 
         print('-' * 60)
+    if show_timing:
+        policy_time = time.time() - start_policy_time
+        print(f"Policy processing took {policy_time:.2f} seconds", flush=True)
+        if policy_count > 0:
+            print(f"Average policy processing time: {policy_time / policy_count:.2f} seconds", flush=True)
 
 if __name__ == '__main__':
     main()
