@@ -138,7 +138,7 @@ def check_aws_access():
 def list_aws_profiles():
     """List available AWS profiles in credentials and config files"""
     profiles = set()
-    
+
     # Check ~/.aws/credentials
     cred_path = os.path.expanduser("~/.aws/credentials")
     if os.path.exists(cred_path):
@@ -161,78 +161,54 @@ def list_aws_profiles():
     
     return sorted(list(profiles))
 
-def get_rds_instances(search_term):
-    """Find RDS MySQL instances matching the search term"""
-    rds = boto3.client('rds')
-    
-    # List all RDS instances
-    response = rds.describe_db_instances()
-    
-    # Convert search term to lowercase for case-insensitive comparison
+def get_redshift_clusters(search_term):
+    """Find Redshift clusters matching the search term"""
+    redshift = boto3.client('redshift')
+    response = redshift.describe_clusters()
     search_term_lower = search_term.lower()
-    
     result = []
-    for instance in response['DBInstances']:
-        # Only include MySQL instances
-        if 'mysql' not in instance['Engine'].lower():
-            continue
-            
-        instance_id = instance['DBInstanceIdentifier']
-        endpoint = instance['Endpoint']['Address']
-        port = instance['Endpoint']['Port']
-        engine = instance['Engine']
-        resource_id = instance.get('DbiResourceId', '')
-        db_name = instance.get('DBName', '')
-        master_username = instance.get('MasterUsername', '')
-        
-        # Get tags if they exist
+    for cluster in response['Clusters']:
+        cluster_id = cluster['ClusterIdentifier']
+        endpoint = cluster['Endpoint']['Address']
+        port = cluster['Endpoint']['Port']
+        db_name = cluster.get('DBName', '')
+        master_username = cluster.get('MasterUsername', '')
         tags = {}
         try:
-            tag_list = rds.list_tags_for_resource(ResourceName=instance['DBInstanceArn'])
-            tags = {tag['Key']: tag['Value'] for tag in tag_list.get('TagList', [])}
+            tag_list = redshift.describe_tags(ResourceName=cluster['ClusterNamespaceArn'])
+            tags = {tag['Key']: tag['Value'] for tag in tag_list.get('TaggedResources', [])}
         except Exception:
-            # Some instances might not support tagging or we might not have permission
             pass
-        
-        # Check all relevant fields for the search term
         if any([
-            search_term_lower in instance_id.lower(),                # Instance ID
-            search_term_lower in endpoint.lower(),                   # Endpoint address
-            search_term_lower in engine.lower(),                     # Engine type (e.g., aurora-mysql)
-            db_name and search_term_lower in db_name.lower(),        # Database name if available
-            search_term_lower in resource_id.lower(),                # Resource ID
-            search_term_lower in master_username.lower(),            # Master username
-            # Check all tag values
+            search_term_lower in cluster_id.lower(),
+            search_term_lower in endpoint.lower(),
+            db_name and search_term_lower in db_name.lower(),
+            search_term_lower in master_username.lower(),
             any(search_term_lower in value.lower() for value in tags.values()),
-            # Check all tag keys
             any(search_term_lower in key.lower() for key in tags.keys())
         ]):
-            # Create a dictionary of relevant instance information
             instance_info = {
-                'id': instance_id,
+                'id': cluster_id,
                 'endpoint': endpoint,
                 'port': port,
-                'engine': engine,
-                'resource_id': resource_id,
                 'db_name': db_name if db_name else 'N/A',
                 'master_username': master_username,
                 'tags': tags
             }
             result.append(instance_info)
-    
     return result
 
-def select_rds_instance(rds_instances):
-    """Present a menu to select an RDS instance"""
-    if not rds_instances:
-        print("No RDS MySQL instances found matching the search term.")
+def select_redshift_cluster(redshift_clusters):
+    """Present a menu to select a Redshift cluster"""
+    if not redshift_clusters:
+        print("No Redshift clusters found matching the search term.")
         sys.exit(1)
-        
-    choices = [f"{instance['id']} - {instance['endpoint']} ({instance['engine']})" for instance in rds_instances]
+    
+    choices = [f"{instance['id']} - {instance['endpoint']} (port {instance['port']})" for instance in redshift_clusters]
     
     questions = [
         inquirer.List('selected_instance',
-                      message="Which RDS instance do you want to connect to?",
+                      message="Which Redshift cluster do you want to connect to?",
                       choices=choices)
     ]
     
@@ -242,7 +218,7 @@ def select_rds_instance(rds_instances):
             print("\nSelection cancelled. Exiting.")
             sys.exit(0)
         selected_index = choices.index(answers['selected_instance'])
-        return rds_instances[selected_index]
+        return redshift_clusters[selected_index]
     except KeyboardInterrupt:
         print("\nOperation cancelled. Exiting.")
         sys.exit(0)
@@ -278,22 +254,22 @@ def find_available_ec2(region):
         print(f"Error finding available EC2 instance: {str(e)}")
         sys.exit(1)
 
-def setup_port_forwarding(rds_endpoint, rds_port, local_port=None):
+def setup_port_forwarding(redshift_endpoint, redshift_port, local_port=None):
     """Setup port forwarding using an EC2 instance with SSM"""
-    # If no local port is specified, use 13306 as the default port
+    # If no local port is specified, use 15432 as the default port
     if local_port is None:
-        local_port = 13306
+        local_port = 15432
     
     # Find an available EC2 instance for tunneling
     region = boto3.session.Session().region_name
     instance_id = find_available_ec2(region)
     
-    print(f"\nSetting up RDS port forwarding through SSM:")
+    print(f"\nSetting up Redshift port forwarding through SSM:")
     print(f"  Local port:     {local_port}")
-    print(f"  RDS endpoint:   {rds_endpoint}")
-    print(f"  RDS port:       {rds_port}")
+    print(f"  Redshift endpoint:   {redshift_endpoint}")
+    print(f"  Redshift port:       {redshift_port}")
     print("\nConnect using:")
-    print(f"  mysql -h 127.0.0.1 -P {local_port} -u <username> -p<password> <database>")
+    print(f"  psql -h 127.0.0.1 -p {local_port} -U <username> <database>")
     print("\nPort forwarding active. Press Ctrl+C to quit.\n")
     
     # Define the SSM port forwarding command
@@ -301,25 +277,25 @@ def setup_port_forwarding(rds_endpoint, rds_port, local_port=None):
         "aws", "ssm", "start-session",
         "--target", instance_id,
         "--document-name", "AWS-StartPortForwardingSessionToRemoteHost",
-        "--parameters", f"localPortNumber={local_port},host={rds_endpoint},portNumber={rds_port}"
+        "--parameters", f"localPortNumber={local_port},host={redshift_endpoint},portNumber={redshift_port}"
     ]
     
     # Handle Ctrl+C gracefully
     def signal_handler(sig, frame):
         print("\nPort forwarding stopped.")
         sys.exit(0)
-    
+
     signal.signal(signal.SIGINT, signal_handler)
-    
+
     # Start port forwarding
     subprocess.run(cmd)
 
 def main():
     # Print usage if no search term is provided
     if len(sys.argv) < 2:
-        print("Usage: aws_rds_mysql_ssm_port_forward <search_term> [local_port]")
-        print("  <search_term>: String to match RDS instance names")
-        print("  [local_port]: Optional local port to use (default: 13306)")
+        print("Usage: aws_redshift_ssm_port_forward <search_term> [local_port]")
+        print("  <search_term>: String to match Redshift cluster names")
+        print("  [local_port]: Optional local port to use (default: 15432)")
         sys.exit(1)
 
     # Get search term from first CLI arg
@@ -341,22 +317,22 @@ def main():
     check_aws_access()
     
     # Find RDS instances matching the search term
-    print(f"Searching for MySQL RDS instances matching: {search_term}")
-    rds_instances = get_rds_instances(search_term)
+    print(f"Searching for Redshift clusters matching: {search_term}")
+    redshift_clusters = get_redshift_clusters(search_term)
     
-    if not rds_instances:
-        print("No MySQL RDS instances found matching the search term.")
+    if not redshift_clusters:
+        print("No Redshift clusters found matching the search term.")
         sys.exit(1)
     
-    # Let user select an RDS instance
-    selected_rds = select_rds_instance(rds_instances)
+    # Let user select a Redshift cluster
+    selected_redshift = select_redshift_cluster(redshift_clusters)
     
-    # Setup port forwarding to RDS through an EC2 instance
+    # Setup port forwarding to Redshift through an EC2 instance
     setup_port_forwarding(
-        selected_rds['endpoint'], 
-        selected_rds['port'],
+        selected_redshift['endpoint'],
+        selected_redshift['port'],
         local_port
     )
 
 if __name__ == "__main__":
-    main()
+    main() 

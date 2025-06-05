@@ -15,6 +15,8 @@ This directory contains various AWS command-line helper scripts. Below is a summ
 - `aws_log_export`: Export AWS CloudWatch logs to local files.
 - `aws_public_ip_ls`: List public IP addresses allocated in the account.
 - `aws_rds_mysql_ssm_port_forward`: Set up SSM port forwarding to RDS MySQL instances.
+- `aws_redshift_inspect_user`: Inspect usage and ownership details for a given Redshift user, including role memberships, active sessions, stored procs, and more.
+- `aws_redshift_ssm_port_forward`: Set up SSM port forwarding to Redshift clusters.
 - `aws_role_usage`: Summarize usage of IAM roles across services.
 - `aws_s3_download_files_to_zip`: Download S3 bucket files and compress them into a ZIP archive.
 - `aws_s3_list_all_filenames`: List all object keys in an S3 bucket.
