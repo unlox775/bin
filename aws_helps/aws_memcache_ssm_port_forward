@@ -4,80 +4,61 @@ import inquirer
 import boto3
 import sys
 import os
+import signal
+import subprocess
 import botocore.exceptions
 
 def check_aws_access():
     """Check if we have valid AWS credentials and permissions for SSM sessions"""
-    # Get the current AWS profile
     profile = os.environ.get('AWS_PROFILE', os.environ.get('AWS_DEFAULT_PROFILE', 'default'))
-    
     print(f"Using AWS profile: {profile}")
-    
     try:
-        # Try to get caller identity - lightweight call to verify credentials
         sts = boto3.client('sts')
         identity = sts.get_caller_identity()
         account_id = identity['Account']
         username = identity['Arn'].split('/')[-1]
         print(f"Authenticated as {username} in account {account_id}")
-        
-        # Now check SSM access - we need to use a different approach
         ssm = boto3.client('ssm')
         ec2 = boto3.client('ec2')
-        
         print("Checking SSM session permissions...")
-        
-        # Find any running instance ID to test against
         try:
             ec2_response = ec2.describe_instances(
                 Filters=[{'Name': 'instance-state-name', 'Values': ['running']}],
                 MaxResults=10
             )
-            
             if not ec2_response.get('Reservations') or len(ec2_response['Reservations']) == 0:
                 print("Warning: No running EC2 instances found. Cannot verify SSM permissions.")
-                print("You may encounter issues when trying to establish an SSM session.")
-                return True  # Continue anyway
-                
+                print("You may encounter issues when trying to establish port forwarding.")
+                return True
             instance_id = ec2_response['Reservations'][0]['Instances'][0]['InstanceId']
-            
-            print(f"Testing SSM permission with instance: {instance_id}")
-            
-            # Try to execute a command that will fail for valid reasons other than permissions
-            # This tests if we have the necessary IAM permissions without actually running a command
             try:
+                print(f"Testing SSM permission with instance: {instance_id}")
                 ssm.send_command(
                     InstanceIds=[instance_id],
                     DocumentName='AWS-RunShellScript',
-                    Parameters={'commands': ['echo "test"']},
+                    Parameters={'commands': ['echo \"test\"']},
                     TimeoutSeconds=30,
                     MaxConcurrency='1',
                     MaxErrors='0'
                 )
-                
-                # If we get here, we have the permissions for SSM commands
                 print("✓ You appear to have SSM permissions.")
                 return True
-                
             except botocore.exceptions.ClientError as e:
                 error_code = e.response.get('Error', {}).get('Code')
                 error_msg = str(e)
-                
                 if 'AccessDenied' in error_msg or error_code == 'AccessDeniedException':
                     print("✗ You don't have permission to use SSM.")
-                    print(f"\nYou need ssm:StartSession permission to connect to EC2 instances.")
+                    print(f"\nYou need ssm:StartSession permission to use port forwarding.")
                     print(f"Error message: {error_msg}")
                     print(f"\nYou may need to switch to a profile with more permissions. Try:")
                     print(f"  export AWS_PROFILE=<profile_name>")
                     print(f"  # or")
                     print(f"  aws sso login --profile <profile_name>")
-                    
                     profiles = list_aws_profiles()
                     if profiles:
                         print("\nAvailable AWS profiles:")
                         for p in profiles:
                             print(f"  {p}")
-                    
                     try:
                         if input("\nWould you like to try continuing anyway? (y/N): ").lower() != 'y':
                             sys.exit(1)
@@ -86,16 +67,14 @@ def check_aws_access():
                         sys.exit(0)
                     return False
                 elif 'InvalidInstanceId' in error_msg:
-                    # Instance might not have SSM agent, but we have permission
                     print("✓ You appear to have SSM permissions (but instance might not be SSM-enabled).")
                     return True
                 else:
                     print(f"Warning: Unexpected error checking SSM permissions: {error_msg}")
-                    return True  # Continue anyway
-        
+                    return True
         except botocore.exceptions.ClientError as e:
             print(f"Warning: Could not list EC2 instances: {str(e)}")
-            print("You may encounter issues when trying to establish an SSM session.")
+            print("You may encounter issues when trying to establish port forwarding.")
             try:
                 if input("\nWould you like to try continuing anyway? (y/N): ").lower() != 'y':
                     sys.exit(1)
@@ -103,20 +82,17 @@ def check_aws_access():
                 print("\nOperation cancelled by user. Exiting.")
                 sys.exit(0)
             return False
-            
     except botocore.exceptions.ClientError as e:
         print(f"AWS Access Error: {str(e)}")
         print(f"\nYou may need to switch AWS profiles. Try:")
         print(f"  export AWS_PROFILE=<profile_name>")
         print(f"  # or")
         print(f"  aws sso login --profile <profile_name>")
-        
         profiles = list_aws_profiles()
         if profiles:
             print("\nAvailable AWS profiles:")
             for p in profiles:
                 print(f"  {p}")
-                
         try:
             if input("\nWould you like to try continuing anyway? (y/N): ").lower() != 'y':
                 sys.exit(1)
@@ -126,10 +102,7 @@ def check_aws_access():
         return False
 
 def list_aws_profiles():
-    """List available AWS profiles in credentials and config files"""
     profiles = set()
-    
-    # Check ~/.aws/credentials
     cred_path = os.path.expanduser("~/.aws/credentials")
     if os.path.exists(cred_path):
         with open(cred_path, 'r') as f:
@@ -138,8 +111,6 @@ def list_aws_profiles():
                     profile = line.strip()[1:-1]
                     if profile != 'default' and not profile.startswith('profile '):
                         profiles.add(profile)
-    
-    # Check ~/.aws/config
     config_path = os.path.expanduser("~/.aws/config")
     if os.path.exists(config_path):
         with open(config_path, 'r') as f:
@@ -147,87 +118,105 @@ def list_aws_profiles():
                 if line.strip().startswith('[') and line.strip().endswith(']'):
                     profile = line.strip()[1:-1]
                     if profile.startswith('profile '):
-                        profiles.add(profile[8:])  # Remove 'profile ' prefix
-    
+                        profiles.add(profile[8:])
     return sorted(list(profiles))
 
-def get_instances(search_term):
-    ec2 = boto3.client('ec2')
-    instances = ec2.describe_instances(
-        Filters=[
-            {'Name': 'instance-state-name', 'Values': ['running']}
-        ]
-    )['Reservations']
-
+def get_memcache_clusters(search_term):
+    elasticache = boto3.client('elasticache')
+    response = elasticache.describe_cache_clusters(ShowCacheNodeInfo=True)
+    search_term_lower = search_term.lower()
     result = []
-    for reservation in instances:
-        for instance in reservation['Instances']:
-            instance_tags = instance.get('Tags', [])
-            instance_name = next((tag['Value'] for tag in instance_tags if tag['Key'] == 'Name'), '')
-            if (search_term in instance['InstanceId'] or
-                search_term in instance_name or
-                any(search_term in tag['Value'] for tag in instance_tags)):
-                instance_info = {
-                    'id': instance['InstanceId'],
-                    'name': instance_name or 'N/A',
-                    'tags': {tag['Key']: tag['Value'] for tag in instance_tags}
-                }
-                result.append(instance_info)
-
+    for cluster in response['CacheClusters']:
+        if cluster['Engine'].lower() != 'memcached':
+            continue
+        cluster_id = cluster['CacheClusterId']
+        endpoint = cluster.get('ConfigurationEndpoint', {}).get('Address')
+        port = cluster.get('ConfigurationEndpoint', {}).get('Port')
+        if not endpoint or not port:
+            continue
+        if any([
+            search_term_lower in cluster_id.lower(),
+            search_term_lower in endpoint.lower(),
+        ]):
+            result.append({
+                'id': cluster_id,
+                'endpoint': endpoint,
+                'port': port,
+            })
     return result
 
-def select_instance(instances, search_term):
-    choices = []
-
-    # Chop menu items at screen width minus 5 chars
-    max_name_length = os.get_terminal_size().columns - 5
-
-    for instance in instances:
-        matching_tags = {key: value for key, value in instance['tags'].items() if search_term in value}
-        menu_option = f"{instance['id']} - {instance['name']} - {matching_tags}"
-        choices.append(menu_option[:max_name_length])
-
+def select_memcache_cluster(clusters):
+    if not clusters:
+        print("No Memcache clusters found matching the search term.")
+        sys.exit(1)
+    choices = [f"{c['id']} - {c['endpoint']} (port {c['port']})" for c in clusters]
     questions = [
         inquirer.List('selected_instance',
-                      message="Which instance do you want to connect to?",
+                      message="Which Memcache cluster do you want to connect to?",
                       choices=choices)
     ]
-    try:
-        answers = inquirer.prompt(questions)
-        if answers is None:
-            print("\nSelection cancelled. Exiting.")
-            sys.exit(0)
-        return answers['selected_instance']
-    except KeyboardInterrupt:
-
+    answers = inquirer.prompt(questions)
+    if answers is None:
+        print("\nSelection cancelled. Exiting.")
         sys.exit(0)
+    selected_index = choices.index(answers['selected_instance'])
+    return clusters[selected_index]
 
-def connect_to_instance(instance_id):
-    print("Starting session with command: aws ssm start-session --target " + instance_id)
-    os.execvp('aws', ['aws', 'ssm', 'start-session', '--target', instance_id])
+def find_available_ec2(region):
+    ssm = boto3.client('ssm')
+    ec2 = boto3.client('ec2')
+    try:
+        response = ssm.describe_instance_information()
+        if not response['InstanceInformationList']:
+            print("No EC2 instances with SSM agent found. Unable to create tunnel.")
+            sys.exit(1)
+        instance_id = response['InstanceInformationList'][0]['InstanceId']
+        instance_details = ec2.describe_instances(InstanceIds=[instance_id])
+        instance_name = "Unknown"
+        for tag in instance_details['Reservations'][0]['Instances'][0].get('Tags', []):
+            if tag['Key'] == 'Name':
+                instance_name = tag['Value']
+                break
+        print(f"Using EC2 instance {instance_id} ({instance_name}) as tunnel endpoint")
+        return instance_id
+    except Exception as e:
+        print(f"Error finding available EC2 instance: {str(e)}")
+        sys.exit(1)
+
+def setup_port_forwarding(memcache_endpoint, memcache_port, local_port=None):
+    if local_port is None:
+        local_port = 11211
+    region = boto3.session.Session().region_name
+    instance_id = find_available_ec2(region)
+    print(f"\nSetting up Memcache port forwarding through SSM:")
+    print(f"  Local port:     {local_port}")
+    print(f"  Memcache endpoint:   {memcache_endpoint}")
+    print(f"  Memcache port:       {memcache_port}")
+    print("\nConnect using:")
+    print(f"  memcached-tool 127.0.0.1:{local_port} stats")
+    print("\nPort forwarding active. Press Ctrl+C to quit.\n")
+    cmd = [
+        "aws", "ssm", "start-session",
+        "--target", instance_id,
+        "--document-name", "AWS-StartPortForwardingSessionToRemoteHost",
+        "--parameters", f"localPortNumber={local_port},host={memcache_endpoint},portNumber={memcache_port}"
+    ]
+    def signal_handler(sig, frame):
+        print("\nPort forwarding stopped.")
+        sys.exit(0)
+    signal.signal(signal.SIGINT, signal_handler)
+    subprocess.run(cmd)
 
 def main():
-    # print usage if no search term is provided
     if len(sys.argv) < 2:
-        print("Usage: aws_ec2_ssm_instance_connect <search_term>")
-        return
-
-    # Check AWS access and SSM permissions before proceeding
-    check_aws_access()
-    
-    # get search term from first CLI arg
+        print("Usage: aws_memcache_ssm_port_forward <search_term> [local_port]")
+        sys.exit(1)
     search_term = sys.argv[1]
-    
-    instances = get_instances(search_term)
-
-    if not instances:
-        print("No instances found matching the search term.")
-        return
-
-    selected_instance = select_instance(instances, search_term)
-
-    instance_id = selected_instance.split(' - ')[0]
-    connect_to_instance(instance_id)
+    local_port = int(sys.argv[2]) if len(sys.argv) > 2 else None
+    check_aws_access()
+    clusters = get_memcache_clusters(search_term)
+    selected = select_memcache_cluster(clusters)
+    setup_port_forwarding(selected['endpoint'], selected['port'], local_port)
 
 if __name__ == "__main__":
-    main()
+    main() 

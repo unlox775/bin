@@ -93,8 +93,12 @@ def check_aws_access():
                             for p in profiles:
                                 print(f"  {p}")
                         
-                        if input("\nWould you like to try continuing anyway? (y/N): ").lower() != 'y':
-                            sys.exit(1)
+                        try:
+                            if input("\nWould you like to try continuing anyway? (y/N): ").lower() != 'y':
+                                sys.exit(1)
+                        except KeyboardInterrupt:
+                            print("\nOperation cancelled by user. Exiting.")
+                            sys.exit(0)
                         return False
                     elif 'InvalidInstanceId' in error_msg:
                         # Instance might not have SSM agent, but we have permission
@@ -107,15 +111,23 @@ def check_aws_access():
             except Exception as e:
                 print(f"Warning: Could not check IAM permissions: {str(e)}")
                 print("You may encounter issues when trying to establish port forwarding.")
-                if input("\nWould you like to try continuing anyway? (y/N): ").lower() != 'y':
-                    sys.exit(1)
+                try:
+                    if input("\nWould you like to try continuing anyway? (y/N): ").lower() != 'y':
+                        sys.exit(1)
+                except KeyboardInterrupt:
+                    print("\nOperation cancelled by user. Exiting.")
+                    sys.exit(0)
                 return False
                 
         except botocore.exceptions.ClientError as e:
             print(f"Warning: Could not list EC2 instances: {str(e)}")
             print("You may encounter issues when trying to establish port forwarding.")
-            if input("\nWould you like to try continuing anyway? (y/N): ").lower() != 'y':
-                sys.exit(1)
+            try:
+                if input("\nWould you like to try continuing anyway? (y/N): ").lower() != 'y':
+                    sys.exit(1)
+            except KeyboardInterrupt:
+                print("\nOperation cancelled by user. Exiting.")
+                sys.exit(0)
             return False
             
     except botocore.exceptions.ClientError as e:
@@ -131,8 +143,12 @@ def check_aws_access():
             for p in profiles:
                 print(f"  {p}")
                 
-        if input("\nWould you like to try continuing anyway? (y/N): ").lower() != 'y':
-            sys.exit(1)
+        try:
+            if input("\nWould you like to try continuing anyway? (y/N): ").lower() != 'y':
+                sys.exit(1)
+        except KeyboardInterrupt:
+            print("\nOperation cancelled by user. Exiting.")
+            sys.exit(0)
         return False
 
 def list_aws_profiles():

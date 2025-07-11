@@ -1,0 +1,88 @@
+#!/usr/bin/env python3
+
+import sys
+import socket
+import gzip
+import argparse
+
+def send_command(s, command):
+    s.sendall(command.encode('utf-8') + b'\r\n')
+    data = b''
+    while True:
+        chunk = s.recv(4096)
+        data += chunk
+        if b'END' in chunk or not chunk:
+            break
+    return data.decode('utf-8')
+
+def main():
+    parser = argparse.ArgumentParser(description='Dump all Memcached keys to a .gz file.')
+    parser.add_argument('-H', '--host', required=True, help='Memcached hostname')
+    parser.add_argument('-p', '--port', type=int, default=11211, help='Memcached port (default: 11211)')
+    parser.add_argument('-o', '--output', required=True, help='Output .gz file path')
+
+    args = parser.parse_args()
+
+    try:
+        with socket.create_connection((args.host, args.port)) as s, \
+             gzip.open(args.output, 'wt') as f_out:
+            # Get stats and print curr_items and total_items to stderr
+            stats_response = send_command(s, 'stats')
+            curr_items = None
+            total_items = None
+            for line in stats_response.splitlines():
+                if line.startswith('STAT curr_items '):
+                    curr_items = int(line.split()[2])
+                if line.startswith('STAT total_items '):
+                    total_items = int(line.split()[2])
+            import sys
+            print(f"[memcache stats] curr_items: {curr_items} (current items in cache)", file=sys.stderr)
+            print(f"[memcache stats] total_items: {total_items} (total items ever stored since server start)", file=sys.stderr)
+            print("[memcache info] Note: The number of keys we can enumerate may be less than 'curr_items' due to how Memcached manages memory and exposes keys.", file=sys.stderr)
+            
+            items_response = send_command(s, 'stats items')
+            slab_ids = set()
+            for line in items_response.splitlines():
+                if line.startswith('STAT items:'):
+                    parts = line.split(':')
+                    if len(parts) >= 3:
+                        slab_ids.add(parts[1])
+
+            key_count = 0
+            for slab_id in slab_ids:
+                cachedump_response = send_command(s, f'stats cachedump {slab_id} 100000')
+                for line in cachedump_response.splitlines():
+                    if line.startswith('ITEM '):
+                        key = line.split(' ')[1]
+                        f_out.write(key + '\n')
+                        key_count += 1
+            # Final report
+            print(f"[memcache dump] Output file written: {args.output}", file=sys.stderr)
+            if curr_items:
+                percent_accessible = 100.0 * key_count / curr_items if curr_items else 0.0
+                inaccessible = curr_items - key_count
+                print(f"[memcache report] Keys output: {key_count} ({percent_accessible:.1f}% of curr_items)", file=sys.stderr)
+                print(f"[memcache report] Inaccessible keys: {inaccessible} (These may be expired, evicted, or not accessible via 'cachedump'.)", file=sys.stderr)
+            else:
+                print(f"[memcache report] Keys output: {key_count}", file=sys.stderr)
+            if total_items:
+                percent_remaining = 100.0 * curr_items / total_items if total_items else 0.0
+                print(f"[memcache report] total_items: {total_items} (all-time items stored)", file=sys.stderr)
+                print(f"[memcache report] Currently present: {curr_items} ({percent_remaining:.1f}% of all-time items remain in cache)", file=sys.stderr)
+            print("[memcache info] 'curr_items' is the number of items Memcached believes are currently in cache. 'total_items' is the total number of items ever stored since the server started. Not all items are accessible via 'cachedump' due to expiration, eviction, or slab limitations.", file=sys.stderr)
+    except ConnectionRefusedError:
+        print(f"Error: Could not connect to Memcached at {args.host}:{args.port}")
+        print("Please check that:")
+        print("1. Memcached is running")
+        print("2. The host and port are correct")
+        print("3. There are no firewall rules blocking the connection")
+        sys.exit(1)
+    except socket.gaierror as e:
+        print(f"Error: Could not resolve hostname '{args.host}': {e}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error connecting to Memcached: {e}")
+        sys.exit(1)
+
+if __name__ == '__main__':
+    main()

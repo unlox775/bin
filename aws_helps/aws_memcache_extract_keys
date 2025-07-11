@@ -1,0 +1,429 @@
+#!/usr/bin/env python3
+
+import sys
+import socket
+import argparse
+import os
+import json
+import mimetypes
+import subprocess
+import tempfile
+from pathlib import Path
+
+# Try to import yaml, but make it optional
+try:
+    import yaml
+    YAML_AVAILABLE = True
+except ImportError:
+    YAML_AVAILABLE = False
+
+def decode_ruby_marshal(content):
+    """Decode Ruby Marshal format to extract the actual content"""
+    try:
+        # Create a temporary Ruby script to decode the Marshal data
+        ruby_script = '''
+require 'json'
+require 'base64'
+
+# Polyfill: auto-define missing classes/modules as dummies
+module Kernel
+  def self.const_missing(name)
+    Object.const_set(name, Class.new) unless Object.const_defined?(name)
+    Object.const_get(name)
+  end
+end
+
+# Dummy ActiveSupport::Cache::Entry with .value
+module ActiveSupport
+  module Cache
+    class Entry
+      attr_accessor :value
+      def initialize(*args)
+        @value = args[0] if args.size > 0
+      end
+    end
+  end
+end
+
+begin
+  marshal_data = STDIN.read
+  decoded = Marshal.load(marshal_data)
+
+  # If it's an ActiveSupport::Cache::Entry, extract .value
+  if decoded.class.name == "ActiveSupport::Cache::Entry" && decoded.respond_to?(:value)
+    actual_value = decoded.value
+  else
+    actual_value = decoded
+  end
+
+  # Output binary data directly to stdout
+  if actual_value.is_a?(String)
+    # For binary strings, output as raw bytes
+    STDOUT.binmode
+    STDOUT.write(actual_value)
+  else
+    # For other types, convert to JSON
+    puts actual_value.to_json
+  end
+rescue => e
+  STDERR.puts "Ruby decode error: #{e.message}"
+  STDERR.puts "Error class: #{e.class}"
+  STDERR.puts "Backtrace: #{e.backtrace.first(5).join('\n')}"
+  exit 1
+end
+'''
+        
+        # Write the Ruby script to a temporary file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.rb', delete=False) as f:
+            f.write(ruby_script)
+            ruby_script_path = f.name
+        
+        try:
+            # Run the Ruby script with the content as input
+            result = subprocess.run(
+                ['ruby', ruby_script_path],
+                input=content.encode('latin1'),
+                capture_output=True,
+                text=False
+            )
+            # Always print Ruby script stderr for debugging
+            if result.stderr:
+                print(f"Ruby script stderr: {result.stderr.decode('utf-8', errors='ignore')}", file=sys.stderr)
+            
+            if result.returncode == 0:
+                # Successfully decoded, return the raw bytes
+                return result.stdout
+            else:
+                # Ruby script failed, return original content
+                print(f"Ruby decode failed: {result.stderr.decode('utf-8', errors='ignore')}", file=sys.stderr)
+                return content.encode('latin1') if isinstance(content, str) else content
+                
+        finally:
+            # Clean up temporary file
+            os.unlink(ruby_script_path)
+            
+    except Exception as e:
+        print(f"Error in Ruby decode: {e}", file=sys.stderr)
+        return content.encode('latin1') if isinstance(content, str) else content
+
+def is_ruby_marshal(content):
+    """Check if content appears to be Ruby Marshal format"""
+    if not content:
+        return False
+    
+    # Ruby Marshal format starts with specific bytes
+    # Version 4.8: \x04\x08
+    # Version 4.9: \x04\x09
+    # Version 5.0: \x04\x0A
+    # etc.
+    if isinstance(content, bytes):
+        if (content.startswith(b'\x04\x08') or content.startswith(b'\x04\x09') or 
+            content.startswith(b'\x04\x0A')):
+            return True
+    else:
+        if (content.startswith('\x04\x08') or content.startswith('\x04\x09') or 
+            content.startswith('\x04\x0A')):
+            return True
+    
+    # Also check for ActiveSupport::Cache::Entry indicators
+    if isinstance(content, bytes):
+        if b'ActiveSupport::Cache::Entry' in content:
+            return True
+    else:
+        if 'ActiveSupport::Cache::Entry' in content:
+            return True
+    
+    return False
+
+def is_mostly_printable(s):
+    # Returns True if >90% of characters are printable and no nulls
+    if not isinstance(s, str):
+        return False
+    null_count = s.count('\x00')
+    if null_count > 0:
+        return False
+    printable = sum(1 for c in s if (32 <= ord(c) <= 126) or c in '\t\n\r')
+    return printable / max(1, len(s)) > 0.9
+
+def send_command(s, command):
+    """Send a command to memcached and return the response"""
+    s.sendall(command.encode('utf-8') + b'\r\n')
+    data = b''
+    while True:
+        chunk = s.recv(4096)
+        data += chunk
+        if b'END' in chunk or not chunk:
+            break
+    return data
+
+def get_key_value(s, key):
+    """Get the value for a specific key from memcached"""
+    response = send_command(s, f'get {key}')
+    
+    # Check if we got a response
+    if not response or b'END' not in response:
+        return None, None
+    
+    # Split response into lines
+    lines = response.split(b'\r\n')
+    
+    # Find the VALUE line
+    value_line = None
+    for line in lines:
+        if line.startswith(b'VALUE '):
+            value_line = line.decode('utf-8', errors='ignore')
+            break
+    
+    if not value_line:
+        return None, None
+    
+    # Parse the VALUE line: "VALUE key flags size"
+    parts = value_line.split()
+    if len(parts) < 4:
+        return None, None
+    
+    flags = int(parts[2])
+    size = int(parts[3])
+    
+    # Check if there's an expiration time in the flags
+    if flags > 0xFFFFFF:
+        expiration = flags >> 24
+    else:
+        expiration = None
+    
+    # Find the value content
+    # The value starts after the VALUE line and ends before END
+    value_start = response.find(b'\r\n', response.find(b'VALUE ')) + 2
+    value_end = response.rfind(b'\r\nEND')
+    
+    if value_start > 0 and value_end > value_start:
+        value_content = response[value_start:value_end]
+        
+        # Try to decode as UTF-8 first, but fall back to latin1 if it fails
+        try:
+            content = value_content.decode('utf-8')
+        except UnicodeDecodeError:
+            # If UTF-8 decode fails, treat as binary
+            content = value_content.decode('latin1')
+        
+        return content, expiration
+    
+    return None, None
+
+def detect_file_type(content):
+    """Detect the file type based on content and return appropriate extension"""
+    if not content:
+        return '.txt'
+    
+    # Check if content is Ruby Marshal format
+    if is_ruby_marshal(content):
+        # Try to decode Ruby Marshal content
+        decoded_content = decode_ruby_marshal(content)
+        if decoded_content != content:
+            # Successfully decoded, detect type from decoded content
+            return detect_file_type(decoded_content)
+    
+    # Handle bytes vs string
+    if isinstance(content, bytes):
+        # For bytes, check for binary signatures
+        if content.startswith(b'\x89PNG\r\n\x1a\n'):
+            return '.png'
+        elif content.startswith(b'\xff\xd8\xff'):
+            return '.jpg'
+        elif content.startswith(b'GIF87a') or content.startswith(b'GIF89a'):
+            return '.gif'
+        elif content.startswith(b'RIFF') and len(content) > 12 and content[8:12] == b'WEBP':
+            return '.webp'
+        elif content.startswith(b'\x00\x00\x01\x00'):
+            return '.ico'
+        else:
+            # Check if it's mostly printable text
+            try:
+                text_content = content.decode('utf-8')
+                if is_mostly_printable(text_content):
+                    return '.txt'
+            except UnicodeDecodeError:
+                pass
+            return '.bin'  # Generic binary file
+    
+    # Handle string content
+    if isinstance(content, str):
+        # Check if content is binary by looking for null bytes or non-printable characters
+        is_binary = False
+        null_count = content.count('\x00')
+        non_printable = sum(1 for c in content if ord(c) < 32 and c not in '\t\n\r')
+        if null_count > 0 or non_printable > len(content) * 0.1:
+            is_binary = True
+        
+        if is_binary:
+            # Try to detect image types by checking for binary content
+            if content.startswith('\x89PNG\r\n\x1a\n'):
+                return '.png'
+            elif content.startswith('\xff\xd8\xff'):
+                return '.jpg'
+            elif content.startswith('GIF87a') or content.startswith('GIF89a'):
+                return '.gif'
+            elif content.startswith('RIFF') and content[8:12] == 'WEBP':
+                return '.webp'
+            elif content.startswith('\x00\x00\x01\x00'):
+                return '.ico'
+            else:
+                return '.bin'  # Generic binary file
+        
+        # Try to detect JSON
+        try:
+            json.loads(content)
+            return '.json'
+        except (json.JSONDecodeError, ValueError):
+            pass
+        
+        # Try to detect YAML (only if available)
+        if YAML_AVAILABLE:
+            try:
+                yaml.safe_load(content)
+                return '.yaml'
+            except (yaml.YAMLError, ValueError):
+                pass
+    
+    # Default to text
+    return '.txt'
+
+def write_key_to_file(key, content, output_path, expiration=None):
+    """Write key content to file with appropriate extension"""
+    if not content:
+        print(f"Warning: No content found for key '{key}'", file=sys.stderr)
+        return
+    
+    # Check if content is Ruby Marshal format and decode it
+    if is_ruby_marshal(content):
+        print(f"Detected Ruby Marshal format for key '{key}', decoding...", file=sys.stderr)
+        decoded_content = decode_ruby_marshal(content)
+        if decoded_content != content:
+            content = decoded_content
+            print(f"Successfully decoded Ruby Marshal content for key '{key}'", file=sys.stderr)
+    
+    # Detect file type and add extension if needed
+    file_ext = detect_file_type(content)
+    
+    # If output_path doesn't have an extension, add the detected one
+    if not Path(output_path).suffix:
+        output_path += file_ext
+    
+    try:
+        # Handle bytes content (from Ruby decoding)
+        if isinstance(content, bytes):
+            with open(output_path, 'wb') as f:
+                f.write(content)
+        else:
+            # Handle string content
+            # Decide if we should write as text or binary
+            is_binary = file_ext in ['.png', '.jpg', '.gif', '.webp', '.ico', '.bin']
+            if is_binary and is_mostly_printable(content):
+                print(f"Content for key '{key}' is mostly printable, writing as UTF-8 text instead of binary.", file=sys.stderr)
+                is_binary = False
+                file_ext = '.txt'
+                if not Path(output_path).suffix:
+                    output_path += '.txt'
+            
+            if is_binary:
+                # Try to write as latin-1 bytes first
+                try:
+                    with open(output_path, 'wb') as f:
+                        f.write(content.encode('latin1'))  # Use latin1 to preserve binary data
+                except UnicodeEncodeError as e:
+                    print(f"latin-1 encode failed: {e}, trying utf-8 bytes", file=sys.stderr)
+                    try:
+                        with open(output_path, 'wb') as f:
+                            f.write(content.encode('utf-8'))
+                    except Exception as e2:
+                        print(f"utf-8 encode also failed: {e2}", file=sys.stderr)
+                        # As a last resort, write only the ascii-representable part
+                        with open(output_path, 'wb') as f:
+                            f.write(content.encode('ascii', errors='ignore'))
+            else:
+                # Write text content
+                with open(output_path, 'w', encoding='utf-8') as f:
+                    f.write(content)
+        
+        # Print extraction info including expiration
+        print(f"Extracted key '{key}' to: {output_path}", file=sys.stderr)
+        if expiration is not None:
+            if expiration == 0:
+                print(f"  Expiration: Never expires", file=sys.stderr)
+            else:
+                import time
+                current_time = int(time.time())
+                if expiration > current_time:
+                    expires_in = expiration - current_time
+                    print(f"  Expiration: Expires in {expires_in} seconds ({expires_in//3600}h {(expires_in%3600)//60}m)", file=sys.stderr)
+                else:
+                    print(f"  Expiration: Already expired", file=sys.stderr)
+        else:
+            print(f"  Expiration: Unknown", file=sys.stderr)
+            
+    except Exception as e:
+        print(f"Error writing key '{key}' to {output_path}: {e}", file=sys.stderr)
+
+def main():
+    parser = argparse.ArgumentParser(description='Extract keys from Memcached and save to files with appropriate extensions')
+    parser.add_argument('-H', '--host', required=True, help='Memcached hostname')
+    parser.add_argument('-p', '--port', type=int, default=11211, help='Memcached port (default: 11211)')
+    parser.add_argument('-o', '--output', required=True, help='Output file or directory path')
+    parser.add_argument('-k', '--keys', help='Comma-delimited list of keys to extract, or "-" to read from stdin (one per line)')
+    
+    args = parser.parse_args()
+    
+    # Parse keys
+    keys = []
+    if args.keys == '-':
+        keys = [line.strip() for line in sys.stdin if line.strip()]
+    else:
+        keys = [k.strip() for k in args.keys.split(',') if k.strip()]
+    
+    if not keys:
+        print("Error: No keys provided", file=sys.stderr)
+        sys.exit(1)
+    
+    try:
+        with socket.create_connection((args.host, args.port)) as s:
+            print(f"Connected to Memcached at {args.host}:{args.port}", file=sys.stderr)
+            
+            if len(keys) == 1:
+                # Single key - output to file
+                key = keys[0]
+                content, expiration = get_key_value(s, key)
+                write_key_to_file(key, content, args.output, expiration)
+            else:
+                # Multiple keys - create directory and output one file per key
+                output_dir = Path(args.output)
+                output_dir.mkdir(parents=True, exist_ok=True)
+                
+                for key in keys:
+                    content, expiration = get_key_value(s, key)
+                    if content:
+                        # Create safe filename from key
+                        safe_key = "".join(c for c in key if c.isalnum() or c in ('-', '_')).rstrip()
+                        if not safe_key:
+                            safe_key = f"key_{hash(key) % 10000}"
+                        
+                        output_path = output_dir / safe_key
+                        write_key_to_file(key, content, str(output_path), expiration)
+                    else:
+                        print(f"Warning: Key '{key}' not found or has no content", file=sys.stderr)
+                        
+    except ConnectionRefusedError:
+        print(f"Error: Could not connect to Memcached at {args.host}:{args.port}")
+        print("Please check that:")
+        print("1. Memcached is running")
+        print("2. The host and port are correct")
+        print("3. There are no firewall rules blocking the connection")
+        sys.exit(1)
+    except socket.gaierror as e:
+        print(f"Error: Could not resolve hostname '{args.host}': {e}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+if __name__ == '__main__':
+    main() 
