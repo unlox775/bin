@@ -183,8 +183,10 @@ def select_instance(instances, search_term):
     max_name_length = os.get_terminal_size().columns - 5
 
     for instance in instances:
+        # Sort matching tags by key to ensure consistent ordering
         matching_tags = {key: value for key, value in instance['tags'].items() if search_term in value}
-        menu_option = f"{instance['id']} - {instance['name']} - {matching_tags}"
+        sorted_matching_tags = dict(sorted(matching_tags.items()))
+        menu_option = f"{instance['id']} - {instance['name']} - {sorted_matching_tags}"
         choices.append(menu_option[:max_name_length])
 
     questions = [
