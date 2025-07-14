@@ -39,7 +39,7 @@ def analyze_policy(policy, current_account_id):
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: s3_policy_analyzer <region> [profile]")
+        print("Usage: aws_bucket_cross_account_access <region> [profile]")
         sys.exit(1)
 
     region = sys.argv[1]
