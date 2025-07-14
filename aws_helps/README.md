@@ -75,7 +75,7 @@ This directory contains various AWS command-line helper scripts organized by ser
 ## Standards and Conventions
 
 - Scripts are named with the `aws_` prefix followed by a descriptive action.
-- All scripts expect AWS credentials via `--profile` or `AWS_PROFILE` env var.
+- Many scripts expect AWS credentials via `--profile` or `AWS_PROFILE` env var.
 - Use `--help` to view usage instructions for each script.
 
 For more details on each script, run:
