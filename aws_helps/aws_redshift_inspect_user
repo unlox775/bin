@@ -195,7 +195,7 @@ def main():
     parser.add_argument(
         "--conn",
         required=True,
-        help="Redshift connection URI (password will be prompted).  This does NOT use the database part of the URL, even if present.  See the --databases option for that."
+        help="Redshift connection URI (password will be prompted). Format: redshift://username@cluster-endpoint:port.  This does NOT use the database part of the URL, even if present.  See the --databases option for that."
     )
     parser.add_argument(
         "--databases",
@@ -205,12 +205,12 @@ def main():
     parser.add_argument(
         "--target-user",
         required=True,
-        help="Which Redshift user do you want to inspect?",
+        help="Redshift username to inspect (e.g., 'old_employee', 'john_doe')",
     )
     parser.add_argument(
         "--json-out",
         default=None,
-        help="If specified, write the collected data in JSON format to this file."
+        help="Write detailed results to JSON file. Use '-' to output to stdout."
     )
     args = parser.parse_args()
 
