@@ -113,6 +113,11 @@ class EC2Proxy:
         else:
             default_instance = self.get_default_ec2_instance()
         
+        # Always show environment variable info to help users optimize
+        print("\nTo avoid EC2 instance selection in the future, set one of these environment variables:")
+        print("  export AWS_SSM_DEFAULT_EC2_INSTANCE=<instance-id>")
+        print("  export AWS_SSM_DEFAULT_EC2_NAME=<instance-name-or-stack-name>")
+        
         # Create choices with useful information
         choices = []
         for instance in instances:
@@ -132,9 +137,6 @@ class EC2Proxy:
         # Add option to use default if available
         if default_instance:
             print(f"\nDefault EC2 instance available: {default_instance}")
-            print("You can set to skip this selection:")
-            print("  export AWS_SSM_DEFAULT_EC2_INSTANCE=<instance-id>")
-            print("  export AWS_SSM_DEFAULT_EC2_NAME=<instance-name-or-stack-name>")
         
         questions = [
             inquirer.List('selected_instance',
@@ -167,41 +169,31 @@ class EC2Proxy:
         if default_instance:
             print(f"Looking for default EC2 instance: {default_instance}")
             
-            # First try to match by instance ID
-            instance_id = os.environ.get('AWS_SSM_DEFAULT_EC2_INSTANCE')
-            if instance_id:
+            # Check if it looks like an instance ID or a name
+            if default_instance.startswith('i-'):
+                # It's an instance ID, try to match directly
                 for instance in instances:
-                    if instance['id'] == instance_id:
+                    if instance['id'] == default_instance:
                         print(f"Found default EC2 instance by ID: {instance['id']} ({instance['name']})")
                         print("To avoid this selection in the future, set:")
                         print("  export AWS_SSM_DEFAULT_EC2_INSTANCE=<instance-id>")
                         print("  export AWS_SSM_DEFAULT_EC2_NAME=<instance-name-or-stack-name>")
                         return instance['id']
-                print(f"Warning: Default instance ID {instance_id} not found in available instances")
-            
-            # Then try to match by name/stack name
-            instance_name = os.environ.get('AWS_SSM_DEFAULT_EC2_NAME')
-            if instance_name:
-                # First try exact name match
-                for instance in instances:
-                    if instance['name'] == instance_name:
-                        print(f"Found default EC2 instance by name: {instance['id']} ({instance['name']})")
-                        print("To avoid this selection in the future, set:")
-                        print("  export AWS_SSM_DEFAULT_EC2_INSTANCE=<instance-id>")
-                        print("  export AWS_SSM_DEFAULT_EC2_NAME=<instance-name-or-stack-name>")
-                        return instance['id']
-                
-                # Then try stack name match
-                for instance in instances:
-                    stack_name = instance['tags'].get('aws:cloudformation:stack-name')
-                    if stack_name == instance_name:
-                        print(f"Found default EC2 instance by stack name: {instance['id']} ({instance['name']}) [stack: {stack_name}]")
-                        print("To avoid this selection in the future, set:")
-                        print("  export AWS_SSM_DEFAULT_EC2_INSTANCE=<instance-id>")
-                        print("  export AWS_SSM_DEFAULT_EC2_NAME=<instance-name-or-stack-name>")
-                        return instance['id']
-                
-                print(f"Warning: Default instance name/stack '{instance_name}' not found in available instances")
+                print(f"Warning: Default instance ID {default_instance} not found in available instances")
+            else:
+                # It's a name, try to look it up
+                instance_id = self._find_instance_id_by_name(default_instance)
+                if instance_id:
+                    # Find the instance details for display
+                    for instance in instances:
+                        if instance['id'] == instance_id:
+                            print(f"Found default EC2 instance by name: {instance['id']} ({instance['name']})")
+                            print("To avoid this selection in the future, set:")
+                            print("  export AWS_SSM_DEFAULT_EC2_INSTANCE=<instance-id>")
+                            print("  export AWS_SSM_DEFAULT_EC2_NAME=<instance-name-or-stack-name>")
+                            return instance['id']
+                else:
+                    print(f"Warning: Default instance name '{default_instance}' not found in available instances")
         
         # Auto-select the first instance (sorted by name/stack)
         instance = instances[0]
@@ -231,6 +223,23 @@ class EC2Proxy:
             else:
                 # Other errors - assume we have permission
                 return True
+    
+    def _find_instance_id_by_name(self, instance_name):
+        """Find instance ID by name (case-insensitive)"""
+        instances = self.get_ec2_instances_with_ssm()
+        
+        # First try exact match (case-insensitive)
+        for instance in instances:
+            if instance['name'].lower() == instance_name.lower():
+                return instance['id']
+        
+        # Then try stack name match
+        for instance in instances:
+            stack_name = instance['tags'].get('aws:cloudformation:stack-name')
+            if stack_name and stack_name.lower() == instance_name.lower():
+                return instance['id']
+        
+        return None
     
     def setup_port_forwarding(self, target_host, target_port, local_port=None, service_name="service"):
         """Setup port forwarding using an EC2 instance with SSM"""
@@ -332,7 +341,26 @@ class EC2Proxy:
         default_instance = self.get_default_ec2_instance()
         if default_instance:
             print(f"Using default EC2 instance from environment: {default_instance}")
-            instance_id = default_instance
+            
+            # Check if it looks like an instance ID or a name
+            if default_instance.startswith('i-'):
+                # It's an instance ID, use it directly
+                instance_id = default_instance
+            else:
+                # It's a name, try to look it up
+                print(f"Looking up instance ID for name: {default_instance}")
+                instance_id = self._find_instance_id_by_name(default_instance)
+                if not instance_id:
+                    print(f"Warning: Could not find instance with name '{default_instance}'")
+                    print("Please choose an EC2 instance:")
+                    instances = self.get_ec2_instances_with_ssm()
+                    if instances:
+                        selected_instance = self.select_ec2_instance(instances)
+                        instance_id = selected_instance['id']
+                        print(f"Using selected instance: {instance_id} ({selected_instance['name']})")
+                    else:
+                        print("No EC2 instances with SSM agent found.")
+                        return False
         else:
             # Find any running instance ID to test against
             try:
@@ -403,7 +431,7 @@ class EC2Proxy:
                     print("\nOperation cancelled by user. Exiting.")
                     sys.exit(0)
                 return False
-            elif 'InvalidInstanceId' in error_msg:
+            elif 'InvalidInstanceId' in error_msg or 'ValidationException' in error_msg:
                 # Instance might not have SSM agent, but we have permission
                 print("✓ You appear to have SSM permissions (but instance might not be SSM-enabled).")
                 return True
