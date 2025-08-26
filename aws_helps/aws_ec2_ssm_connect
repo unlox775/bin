@@ -7,117 +7,92 @@ import os
 import botocore.exceptions
 import argparse
 
+# Import only AWSCommon since this script doesn't do port forwarding
+from lib.aws_common import AWSCommon
+
+# Initialize AWSCommon
+aws_common = AWSCommon()
+
 def check_aws_access():
     """Check if we have valid AWS credentials and permissions for SSM sessions"""
-    # Get the current AWS profile
-    profile = os.environ.get('AWS_PROFILE', os.environ.get('AWS_DEFAULT_PROFILE', 'default'))
+    # Use AWSCommon for credential checking
+    if not aws_common.check_aws_credentials():
+        return False
     
-    print(f"Using AWS profile: {profile}")
+    # Now check SSM access
+    ssm = boto3.client('ssm')
+    ec2 = boto3.client('ec2')
     
+    print("Checking SSM session permissions...")
+    
+    # Find any running instance ID to test against
     try:
-        # Try to get caller identity - lightweight call to verify credentials
-        sts = boto3.client('sts')
-        identity = sts.get_caller_identity()
-        account_id = identity['Account']
-        username = identity['Arn'].split('/')[-1]
-        print(f"Authenticated as {username} in account {account_id}")
+        ec2_response = ec2.describe_instances(
+            Filters=[{'Name': 'instance-state-name', 'Values': ['running']}],
+            MaxResults=10
+        )
         
-        # Now check SSM access - we need to use a different approach
-        ssm = boto3.client('ssm')
-        ec2 = boto3.client('ec2')
+        if not ec2_response.get('Reservations') or len(ec2_response['Reservations']) == 0:
+            print("Warning: No running EC2 instances found. Cannot verify SSM permissions.")
+            print("You may encounter issues when trying to establish an SSM session.")
+            return True  # Continue anyway
+            
+        instance_id = ec2_response['Reservations'][0]['Instances'][0]['InstanceId']
         
-        print("Checking SSM session permissions...")
+        print(f"Testing SSM permission with instance: {instance_id}")
         
-        # Find any running instance ID to test against
+        # Try to execute a command that will fail for valid reasons other than permissions
         try:
-            ec2_response = ec2.describe_instances(
-                Filters=[{'Name': 'instance-state-name', 'Values': ['running']}],
-                MaxResults=10
+            ssm.send_command(
+                InstanceIds=[instance_id],
+                DocumentName='AWS-RunShellScript',
+                Parameters={'commands': ['echo "test"']},
+                TimeoutSeconds=30,
+                MaxConcurrency='1',
+                MaxErrors='0'
             )
             
-            if not ec2_response.get('Reservations') or len(ec2_response['Reservations']) == 0:
-                print("Warning: No running EC2 instances found. Cannot verify SSM permissions.")
-                print("You may encounter issues when trying to establish an SSM session.")
-                return True  # Continue anyway
-                
-            instance_id = ec2_response['Reservations'][0]['Instances'][0]['InstanceId']
+            # If we get here, we have the permissions for SSM commands
+            print("✓ You appear to have SSM permissions.")
+            return True
             
-            print(f"Testing SSM permission with instance: {instance_id}")
-            
-            # Try to execute a command that will fail for valid reasons other than permissions
-            # This tests if we have the necessary IAM permissions without actually running a command
-            try:
-                ssm.send_command(
-                    InstanceIds=[instance_id],
-                    DocumentName='AWS-RunShellScript',
-                    Parameters={'commands': ['echo "test"']},
-                    TimeoutSeconds=30,
-                    MaxConcurrency='1',
-                    MaxErrors='0'
-                )
-                
-                # If we get here, we have the permissions for SSM commands
-                print("✓ You appear to have SSM permissions.")
-                return True
-                
-            except botocore.exceptions.ClientError as e:
-                error_code = e.response.get('Error', {}).get('Code')
-                error_msg = str(e)
-                
-                if 'AccessDenied' in error_msg or error_code == 'AccessDeniedException':
-                    print("✗ You don't have permission to use SSM.")
-                    print(f"\nYou need ssm:StartSession permission to connect to EC2 instances.")
-                    print(f"Error message: {error_msg}")
-                    print(f"\nYou may need to switch to a profile with more permissions. Try:")
-                    print(f"  export AWS_PROFILE=<profile_name>")
-                    print(f"  # or")
-                    print(f"  aws sso login --profile <profile_name>")
-                    
-                    profiles = list_aws_profiles()
-                    if profiles:
-                        print("\nAvailable AWS profiles:")
-                        for p in profiles:
-                            print(f"  {p}")
-                    
-                    try:
-                        if input("\nWould you like to try continuing anyway? (y/N): ").lower() != 'y':
-                            sys.exit(1)
-                    except KeyboardInterrupt:
-                        print("\nOperation cancelled by user. Exiting.")
-                        sys.exit(0)
-                    return False
-                elif 'InvalidInstanceId' in error_msg:
-                    # Instance might not have SSM agent, but we have permission
-                    print("✓ You appear to have SSM permissions (but instance might not be SSM-enabled).")
-                    return True
-                else:
-                    print(f"Warning: Unexpected error checking SSM permissions: {error_msg}")
-                    return True  # Continue anyway
-        
         except botocore.exceptions.ClientError as e:
-            print(f"Warning: Could not list EC2 instances: {str(e)}")
-            print("You may encounter issues when trying to establish an SSM session.")
-            try:
-                if input("\nWould you like to try continuing anyway? (y/N): ").lower() != 'y':
-                    sys.exit(1)
-            except KeyboardInterrupt:
-                print("\nOperation cancelled by user. Exiting.")
-                sys.exit(0)
-            return False
+            error_code = e.response.get('Error', {}).get('Code')
+            error_msg = str(e)
             
-    except botocore.exceptions.ClientError as e:
-        print(f"AWS Access Error: {str(e)}")
-        print(f"\nYou may need to switch AWS profiles. Try:")
-        print(f"  export AWS_PROFILE=<profile_name>")
-        print(f"  # or")
-        print(f"  aws sso login --profile <profile_name>")
-        
-        profiles = list_aws_profiles()
-        if profiles:
-            print("\nAvailable AWS profiles:")
-            for p in profiles:
-                print(f"  {p}")
+            if 'AccessDenied' in error_msg or error_code == 'AccessDeniedException':
+                print("✗ You don't have permission to use SSM.")
+                print(f"\nYou need ssm:StartSession permission to connect to EC2 instances.")
+                print(f"Error message: {error_msg}")
+                print(f"\nYou may need to switch to a profile with more permissions. Try:")
+                print(f"  export AWS_PROFILE=<profile_name>")
+                print(f"  # or")
+                print(f"  aws sso login --profile <profile_name>")
                 
+                profiles = aws_common.list_aws_profiles()
+                if profiles:
+                    print("\nAvailable AWS profiles:")
+                    for p in profiles:
+                        print(f"  {p}")
+                
+                try:
+                    if input("\nWould you like to try continuing anyway? (y/N): ").lower() != 'y':
+                        sys.exit(1)
+                except KeyboardInterrupt:
+                    print("\nOperation cancelled by user. Exiting.")
+                    sys.exit(0)
+                return False
+            elif 'InvalidInstanceId' in error_msg:
+                # Instance might not have SSM agent, but we have permission
+                print("✓ You appear to have SSM permissions (but instance might not be SSM-enabled).")
+                return True
+            else:
+                print(f"Warning: Unexpected error checking SSM permissions: {error_msg}")
+                return True  # Continue anyway
+    
+    except botocore.exceptions.ClientError as e:
+        print(f"Warning: Could not list EC2 instances: {str(e)}")
+        print("You may encounter issues when trying to establish an SSM session.")
         try:
             if input("\nWould you like to try continuing anyway? (y/N): ").lower() != 'y':
                 sys.exit(1)
@@ -126,33 +101,8 @@ def check_aws_access():
             sys.exit(0)
         return False
 
-def list_aws_profiles():
-    """List available AWS profiles in credentials and config files"""
-    profiles = set()
-    
-    # Check ~/.aws/credentials
-    cred_path = os.path.expanduser("~/.aws/credentials")
-    if os.path.exists(cred_path):
-        with open(cred_path, 'r') as f:
-            for line in f:
-                if line.strip().startswith('[') and line.strip().endswith(']'):
-                    profile = line.strip()[1:-1]
-                    if profile != 'default' and not profile.startswith('profile '):
-                        profiles.add(profile)
-    
-    # Check ~/.aws/config
-    config_path = os.path.expanduser("~/.aws/config")
-    if os.path.exists(config_path):
-        with open(config_path, 'r') as f:
-            for line in f:
-                if line.strip().startswith('[') and line.strip().endswith(']'):
-                    profile = line.strip()[1:-1]
-                    if profile.startswith('profile '):
-                        profiles.add(profile[8:])  # Remove 'profile ' prefix
-    
-    return sorted(list(profiles))
-
 def get_instances(search_term):
+    """Get EC2 instances matching the search term"""
     ec2 = boto3.client('ec2')
     instances = ec2.describe_instances(
         Filters=[
@@ -178,6 +128,11 @@ def get_instances(search_term):
     return result
 
 def select_instance(instances, search_term):
+    """Select an EC2 instance from the filtered list"""
+    if not instances:
+        print("No instances found matching the search term.")
+        sys.exit(1)
+    
     choices = []
 
     # Chop menu items at screen width minus 5 chars
@@ -202,10 +157,11 @@ def select_instance(instances, search_term):
             sys.exit(0)
         return answers['selected_instance']
     except KeyboardInterrupt:
-
+        print("\nOperation cancelled by user. Exiting.")
         sys.exit(0)
 
 def connect_to_instance(instance_id):
+    """Connect to the selected EC2 instance via SSM"""
     print("Starting session with command: aws ssm start-session --target " + instance_id)
     os.execvp('aws', ['aws', 'ssm', 'start-session', '--target', instance_id])
 
@@ -235,7 +191,7 @@ or any tag value. It automatically handles AWS profile selection and credential 
     # Check AWS access and SSM permissions before proceeding
     check_aws_access()
     
-    # get search term from first CLI arg
+    # Get search term from first CLI arg
     search_term = args.search_term
     
     instances = get_instances(search_term)

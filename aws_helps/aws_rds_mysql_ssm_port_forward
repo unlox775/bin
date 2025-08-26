@@ -10,7 +10,6 @@ import botocore.exceptions
 import argparse
 
 # Import the AWS helpers library
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from lib.ec2_proxy import EC2Proxy
 from lib.aws_common import AWSCommon
 
