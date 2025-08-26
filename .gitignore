@@ -42,3 +42,11 @@ ng
 node
 nodejs_dev_env_config_polaris
 npm
+
+# Python compiled files
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+.Python
+*.so

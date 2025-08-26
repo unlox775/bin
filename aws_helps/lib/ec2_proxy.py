@@ -2,6 +2,8 @@
 
 import os
 import sys
+import signal
+import subprocess
 import boto3
 import botocore.exceptions
 import inquirer
@@ -229,3 +231,193 @@ class EC2Proxy:
             else:
                 # Other errors - assume we have permission
                 return True
+    
+    def setup_port_forwarding(self, target_host, target_port, local_port=None, service_name="service"):
+        """Setup port forwarding using an EC2 instance with SSM"""
+        # If no local port is specified, use a default
+        if local_port is None:
+            local_port = 13306  # Default for MySQL, can be overridden
+        
+        # Find an available EC2 instance for tunneling
+        import boto3
+        region = boto3.session.Session().region_name
+        instance_id = self.find_available_ec2(region)
+        
+        print(f"\nSetting up {service_name} port forwarding through SSM:")
+        print(f"  Local port:     {local_port}")
+        print(f"  Target host:    {target_host}")
+        print(f"  Target port:    {target_port}")
+        print(f"\nConnect using:")
+        print(f"  <client> -h 127.0.0.1 -P {local_port} [connection-options]")
+        print("\nPort forwarding active. Press Ctrl+C to quit.\n")
+        
+        # Define the SSM port forwarding command
+        cmd = [
+            "aws", "ssm", "start-session",
+            "--target", instance_id,
+            "--document-name", "AWS-StartPortForwardingSessionToRemoteHost",
+            "--parameters", f"localPortNumber={local_port},host={target_host},portNumber={target_port}"
+        ]
+        
+        # Handle Ctrl+C gracefully
+        def signal_handler(sig, frame):
+            print("\nPort forwarding stopped.")
+            sys.exit(0)
+        
+        signal.signal(signal.SIGINT, signal_handler)
+        
+        # Start port forwarding with retry logic
+        max_retries = 3
+        failed_instances = []
+        
+        for attempt in range(max_retries):
+            try:
+                print(f"Attempting connection with command: {' '.join(cmd)}")
+                print("Starting port forwarding session...")
+                
+                # Run the command and capture stderr to detect errors, but let stdout show in real-time
+                result = subprocess.run(cmd, check=True, stderr=subprocess.PIPE, text=True)
+                break
+                
+            except subprocess.CalledProcessError as e:
+                error_output = e.stderr if e.stderr else ""
+                
+                # Check if it's a TargetNotConnected error
+                if "TargetNotConnected" in error_output:
+                    print(f"\nError: Instance {instance_id} is not connected to SSM.")
+                    failed_instances.append(instance_id)
+                    
+                    if attempt < max_retries - 1:
+                        print("Connection failed. Please choose a different EC2 instance:")
+                        # Get a new instance, excluding failed ones
+                        instances = self.get_ec2_instances_with_ssm()
+                        if len(instances) > len(failed_instances):
+                            selected_instance = self.select_ec2_instance(instances, exclude_instance_id=instance_id)
+                            instance_id = selected_instance['id']
+                            print(f"Trying EC2 instance {instance_id} ({selected_instance['name']})...")
+                            # Rebuild the command with new instance
+                            cmd = [
+                                "aws", "ssm", "start-session",
+                                "--target", instance_id,
+                                "--document-name", "AWS-StartPortForwardingSessionToRemoteHost",
+                                "--parameters", f"localPortNumber={local_port},host={target_host},portNumber={target_port}"
+                            ]
+                        else:
+                            print("No other EC2 instances available.")
+                            sys.exit(1)
+                    else:
+                        print("Maximum retries reached. Please check your EC2 instances and try again.")
+                        sys.exit(1)
+                else:
+                    # Re-raise if it's not a TargetNotConnected error
+                    raise
+    
+    def check_aws_ssm_access(self):
+        """Check if we have valid AWS credentials and permissions for SSM sessions"""
+        from .aws_common import AWSCommon
+        
+        aws_common = AWSCommon()
+        
+        # First check basic AWS credentials
+        if not aws_common.check_aws_credentials():
+            return False
+        
+        # Now check SSM access
+        ssm = boto3.client('ssm')
+        ec2 = boto3.client('ec2')
+        
+        print("Checking SSM session permissions...")
+        
+        # Check if we have a default EC2 instance from environment variable
+        default_instance = self.get_default_ec2_instance()
+        if default_instance:
+            print(f"Using default EC2 instance from environment: {default_instance}")
+            instance_id = default_instance
+        else:
+            # Find any running instance ID to test against
+            try:
+                ec2_response = ec2.describe_instances(
+                    Filters=[{'Name': 'instance-state-name', 'Values': ['running']}],
+                    MaxResults=50
+                )
+                
+                if not ec2_response.get('Reservations') or len(ec2_response['Reservations']) == 0:
+                    print("Warning: No running EC2 instances found. Cannot verify SSM permissions.")
+                    print("You may encounter issues when trying to establish port forwarding.")
+                    return True  # Continue anyway
+                    
+                instance_id = ec2_response['Reservations'][0]['Instances'][0]['InstanceId']
+            
+            except botocore.exceptions.ClientError as e:
+                print(f"Warning: Could not list EC2 instances: {str(e)}")
+                print("You may encounter issues when trying to establish port forwarding.")
+                try:
+                    if input("\nWould you like to try continuing anyway? (y/N): ").lower() != 'y':
+                        sys.exit(1)
+                except KeyboardInterrupt:
+                    print("\nOperation cancelled by user. Exiting.")
+                    sys.exit(0)
+                return False
+        
+        # Check if we have ssm:StartSession permission
+        print(f"Testing SSM permission with instance: {instance_id}")
+        
+        try:
+            # Try to execute a command that will fail for valid reasons other than permissions
+            self.ssm.send_command(
+                InstanceIds=[instance_id],
+                DocumentName='AWS-RunShellScript',
+                Parameters={'commands': ['echo "test"']},
+                TimeoutSeconds=30,
+                MaxConcurrency='1',
+                MaxErrors='0'
+            )
+            
+            # If we get here, we have the permissions for SSM commands
+            print("✓ You appear to have SSM permissions.")
+            return True
+            
+        except botocore.exceptions.ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code')
+            error_msg = str(e)
+            
+            if 'AccessDenied' in error_msg or error_code == 'AccessDeniedException':
+                print("✗ You don't have permission to use SSM.")
+                print(f"\nYou need ssm:StartSession permission to use port forwarding.")
+                print(f"Error message: {error_msg}")
+                print(f"\nYou may need to switch to a profile with more permissions. Try:")
+                print(f"  export AWS_PROFILE=<profile_name>")
+                print(f"  # or")
+                print(f"  aws sso login --profile <profile_name>")
+                
+                profiles = aws_common.list_aws_profiles()
+                if profiles:
+                    print("\nAvailable AWS profiles:")
+                    for p in profiles:
+                        print(f"  {p}")
+                
+                try:
+                    if input("\nWould you like to try continuing anyway? (y/N): ").lower() != 'y':
+                        sys.exit(1)
+                except KeyboardInterrupt:
+                    print("\nOperation cancelled by user. Exiting.")
+                    sys.exit(0)
+                return False
+            elif 'InvalidInstanceId' in error_msg:
+                # Instance might not have SSM agent, but we have permission
+                print("✓ You appear to have SSM permissions (but instance might not be SSM-enabled).")
+                return True
+            else:
+                print(f"Warning: Unexpected error checking SSM permissions: {error_msg}")
+                return True  # Continue anyway
+        
+        except Exception as e:
+            print(f"Warning: Could not check IAM permissions: {str(e)}")
+            print("You may encounter issues when trying to establish port forwarding.")
+            try:
+                if input("\nWould you like to try continuing anyway? (y/N): ").lower() != 'y':
+                    sys.exit(1)
+            except KeyboardInterrupt:
+                print("\nOperation cancelled by user. Exiting.")
+                sys.exit(0)
+            return False
