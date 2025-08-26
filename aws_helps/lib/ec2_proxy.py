@@ -175,9 +175,6 @@ class EC2Proxy:
                 for instance in instances:
                     if instance['id'] == default_instance:
                         print(f"Found default EC2 instance by ID: {instance['id']} ({instance['name']})")
-                        print("To avoid this selection in the future, set:")
-                        print("  export AWS_SSM_DEFAULT_EC2_INSTANCE=<instance-id>")
-                        print("  export AWS_SSM_DEFAULT_EC2_NAME=<instance-name-or-stack-name>")
                         return instance['id']
                 print(f"Warning: Default instance ID {default_instance} not found in available instances")
             else:
@@ -188,9 +185,6 @@ class EC2Proxy:
                     for instance in instances:
                         if instance['id'] == instance_id:
                             print(f"Found default EC2 instance by name: {instance['id']} ({instance['name']})")
-                            print("To avoid this selection in the future, set:")
-                            print("  export AWS_SSM_DEFAULT_EC2_INSTANCE=<instance-id>")
-                            print("  export AWS_SSM_DEFAULT_EC2_NAME=<instance-name-or-stack-name>")
                             return instance['id']
                 else:
                     print(f"Warning: Default instance name '{default_instance}' not found in available instances")
