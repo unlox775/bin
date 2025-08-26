@@ -9,6 +9,20 @@ import subprocess
 import botocore.exceptions
 import argparse
 
+def get_default_ec2_instance():
+    """Get default EC2 instance from environment variables"""
+    # First check for instance ID
+    instance_id = os.environ.get('AWS_SSM_DEFAULT_EC2_INSTANCE')
+    if instance_id:
+        return instance_id
+    
+    # Then check for name/stack name
+    instance_name = os.environ.get('AWS_SSM_DEFAULT_EC2_NAME')
+    if instance_name:
+        return instance_name
+    
+    return None
+
 def check_aws_access():
     """Check if we have valid AWS credentials and permissions for SSM sessions"""
     # Get the current AWS profile
@@ -31,86 +45,28 @@ def check_aws_access():
         
         print("Checking SSM session permissions...")
         
-        # Find any running instance ID to test against
-        try:
-            ec2_response = ec2.describe_instances(
-                Filters=[{'Name': 'instance-state-name', 'Values': ['running']}],
-                MaxResults=10
-            )
-            
-            if not ec2_response.get('Reservations') or len(ec2_response['Reservations']) == 0:
-                print("Warning: No running EC2 instances found. Cannot verify SSM permissions.")
-                print("You may encounter issues when trying to establish port forwarding.")
-                return True  # Continue anyway
-                
-            instance_id = ec2_response['Reservations'][0]['Instances'][0]['InstanceId']
-            
-            # Check if we have ssm:StartSession permission
-            # We'll do this by using the IAM policy simulator
-            iam = boto3.client('iam')
+        # Check if we have a default EC2 instance from environment variable
+        default_instance = get_default_ec2_instance()
+        if default_instance:
+            print(f"Using default EC2 instance from environment: {default_instance}")
+            instance_id = default_instance
+        else:
+            # Find any running instance ID to test against
             try:
-                # Get the current user ARN
-                current_user_arn = identity['Arn']
+                ec2_response = ec2.describe_instances(
+                    Filters=[{'Name': 'instance-state-name', 'Values': ['running']}],
+                    MaxResults=50
+                )
                 
-                # Use the IAM policy simulator to check permissions
-                # This is a more accurate way to check if we can start a session
-                print(f"Testing SSM permission with instance: {instance_id}")
-                
-                # Since we can't easily use the simulator, we'll try a mock command execution
-                # This is more likely to properly check permissions
-                try:
-                    # Try to execute a command that will fail for valid reasons other than permissions
-                    # This tests if we have the necessary IAM permissions without actually running a command
-                    ssm.send_command(
-                        InstanceIds=[instance_id],
-                        DocumentName='AWS-RunShellScript',
-                        Parameters={'commands': ['echo "test"']},
-                        TimeoutSeconds=30,
-                        MaxConcurrency='1',
-                        MaxErrors='0'
-                    )
+                if not ec2_response.get('Reservations') or len(ec2_response['Reservations']) == 0:
+                    print("Warning: No running EC2 instances found. Cannot verify SSM permissions.")
+                    print("You may encounter issues when trying to establish port forwarding.")
+                    return True  # Continue anyway
                     
-                    # If we get here, we have the permissions for SSM commands
-                    # This doesn't guarantee SSM sessions will work, but it's a good indicator
-                    print("✓ You appear to have SSM permissions.")
-                    return True
-                    
-                except botocore.exceptions.ClientError as e:
-                    error_code = e.response.get('Error', {}).get('Code')
-                    error_msg = str(e)
-                    
-                    if 'AccessDenied' in error_msg or error_code == 'AccessDeniedException':
-                        print("✗ You don't have permission to use SSM.")
-                        print(f"\nYou need ssm:StartSession permission to use port forwarding.")
-                        print(f"Error message: {error_msg}")
-                        print(f"\nYou may need to switch to a profile with more permissions. Try:")
-                        print(f"  export AWS_PROFILE=<profile_name>")
-                        print(f"  # or")
-                        print(f"  aws sso login --profile <profile_name>")
-                        
-                        profiles = list_aws_profiles()
-                        if profiles:
-                            print("\nAvailable AWS profiles:")
-                            for p in profiles:
-                                print(f"  {p}")
-                        
-                        try:
-                            if input("\nWould you like to try continuing anyway? (y/N): ").lower() != 'y':
-                                sys.exit(1)
-                        except KeyboardInterrupt:
-                            print("\nOperation cancelled by user. Exiting.")
-                            sys.exit(0)
-                        return False
-                    elif 'InvalidInstanceId' in error_msg:
-                        # Instance might not have SSM agent, but we have permission
-                        print("✓ You appear to have SSM permissions (but instance might not be SSM-enabled).")
-                        return True
-                    else:
-                        print(f"Warning: Unexpected error checking SSM permissions: {error_msg}")
-                        return True  # Continue anyway
+                instance_id = ec2_response['Reservations'][0]['Instances'][0]['InstanceId']
             
-            except Exception as e:
-                print(f"Warning: Could not check IAM permissions: {str(e)}")
+            except botocore.exceptions.ClientError as e:
+                print(f"Warning: Could not list EC2 instances: {str(e)}")
                 print("You may encounter issues when trying to establish port forwarding.")
                 try:
                     if input("\nWould you like to try continuing anyway? (y/N): ").lower() != 'y':
@@ -119,9 +75,73 @@ def check_aws_access():
                     print("\nOperation cancelled by user. Exiting.")
                     sys.exit(0)
                 return False
+        
+        # Check if we have ssm:StartSession permission
+        # We'll do this by using the IAM policy simulator
+        iam = boto3.client('iam')
+        try:
+            # Get the current user ARN
+            current_user_arn = identity['Arn']
+            
+            # Use the IAM policy simulator to check permissions
+            # This is a more accurate way to check if we can start a session
+            print(f"Testing SSM permission with instance: {instance_id}")
+            
+            # Since we can't easily use the simulator, we'll try a mock command execution
+            # This is more likely to properly check permissions
+            try:
+                # Try to execute a command that will fail for valid reasons other than permissions
+                # This tests if we have the necessary IAM permissions without actually running a command
+                ssm.send_command(
+                    InstanceIds=[instance_id],
+                    DocumentName='AWS-RunShellScript',
+                    Parameters={'commands': ['echo "test"']},
+                    TimeoutSeconds=30,
+                    MaxConcurrency='1',
+                    MaxErrors='0'
+                )
                 
-        except botocore.exceptions.ClientError as e:
-            print(f"Warning: Could not list EC2 instances: {str(e)}")
+                # If we get here, we have the permissions for SSM commands
+                # This doesn't guarantee SSM sessions will work, but it's a good indicator
+                print("✓ You appear to have SSM permissions.")
+                return True
+                
+            except botocore.exceptions.ClientError as e:
+                error_code = e.response.get('Error', {}).get('Code')
+                error_msg = str(e)
+                
+                if 'AccessDenied' in error_msg or error_code == 'AccessDeniedException':
+                    print("✗ You don't have permission to use SSM.")
+                    print(f"\nYou need ssm:StartSession permission to use port forwarding.")
+                    print(f"Error message: {error_msg}")
+                    print(f"\nYou may need to switch to a profile with more permissions. Try:")
+                    print(f"  export AWS_PROFILE=<profile_name>")
+                    print(f"  # or")
+                    print(f"  aws sso login --profile <profile_name>")
+                    
+                    profiles = list_aws_profiles()
+                    if profiles:
+                        print("\nAvailable AWS profiles:")
+                        for p in profiles:
+                            print(f"  {p}")
+                    
+                    try:
+                        if input("\nWould you like to try continuing anyway? (y/N): ").lower() != 'y':
+                            sys.exit(1)
+                    except KeyboardInterrupt:
+                        print("\nOperation cancelled by user. Exiting.")
+                        sys.exit(0)
+                    return False
+                elif 'InvalidInstanceId' in error_msg:
+                    # Instance might not have SSM agent, but we have permission
+                    print("✓ You appear to have SSM permissions (but instance might not be SSM-enabled).")
+                    return True
+                else:
+                    print(f"Warning: Unexpected error checking SSM permissions: {error_msg}")
+                    return True  # Continue anyway
+        
+        except Exception as e:
+            print(f"Warning: Could not check IAM permissions: {str(e)}")
             print("You may encounter issues when trying to establish port forwarding.")
             try:
                 if input("\nWould you like to try continuing anyway? (y/N): ").lower() != 'y':
@@ -264,36 +284,187 @@ def select_rds_instance(rds_instances):
         print("\nOperation cancelled. Exiting.")
         sys.exit(0)
 
-def find_available_ec2(region):
-    """Find an available EC2 instance with SSM for tunneling"""
+def get_ec2_instances_with_ssm():
+    """Get list of EC2 instances with SSM agent running"""
     ssm = boto3.client('ssm')
     ec2 = boto3.client('ec2')
     
     try:
-        # Find instances with SSM agent running
-        response = ssm.describe_instance_information()
+        # Get instances with SSM agent - increase limit to get more instances
+        ssm_response = ssm.describe_instance_information(MaxResults=50)
         
-        if not response['InstanceInformationList']:
-            print("No EC2 instances with SSM agent found. Unable to create tunnel.")
-            sys.exit(1)
-            
-        # Return first available instance
-        instance_id = response['InstanceInformationList'][0]['InstanceId']
+        if not ssm_response['InstanceInformationList']:
+            return []
         
-        # Get instance details (optional - for display only)
-        instance_details = ec2.describe_instances(InstanceIds=[instance_id])
-        instance_name = "Unknown"
+        # Get instance IDs
+        instance_ids = [info['InstanceId'] for info in ssm_response['InstanceInformationList']]
         
-        for tag in instance_details['Reservations'][0]['Instances'][0].get('Tags', []):
-            if tag['Key'] == 'Name':
-                instance_name = tag['Value']
-                break
+        # Get detailed instance information including tags
+        ec2_response = ec2.describe_instances(InstanceIds=instance_ids)
+        
+        instances = []
+        for reservation in ec2_response['Reservations']:
+            for instance in reservation['Instances']:
+                # Extract tags
+                tags = {}
+                instance_name = "Unknown"
+                stack_name = None
+                for tag in instance.get('Tags', []):
+                    tags[tag['Key']] = tag['Value']
+                    if tag['Key'] == 'Name':
+                        instance_name = tag['Value']
+                    elif tag['Key'] == 'aws:cloudformation:stack-name':
+                        stack_name = tag['Value']
                 
-        print(f"Using EC2 instance {instance_id} ({instance_name}) as tunnel endpoint")
-        return instance_id
+                # Use stack name as fallback for sorting if no name
+                sort_name = instance_name if instance_name != "Unknown" else (stack_name or instance['InstanceId'])
+                
+                # Find most useful tag for display (prefer stack, then first alphabetical)
+                useful_tag = None
+                if stack_name:
+                    useful_tag = f"stack:{stack_name}"
+                else:
+                    # Find first alphabetical tag that's not Name or aws:cloudformation:stack-name
+                    other_tags = [(k, v) for k, v in tags.items() 
+                                 if k not in ['Name', 'aws:cloudformation:stack-name']]
+                    if other_tags:
+                        other_tags.sort(key=lambda x: x[0])  # Sort by key
+                        useful_tag = f"{other_tags[0][0]}:{other_tags[0][1]}"
+                
+                # Create instance info
+                instance_info = {
+                    'id': instance['InstanceId'],
+                    'name': instance_name,
+                    'sort_name': sort_name,
+                    'type': instance['InstanceType'],
+                    'state': instance['State']['Name'],
+                    'tags': tags,
+                    'useful_tag': useful_tag,
+                    'launch_time': instance['LaunchTime']
+                }
+                instances.append(instance_info)
+        
+        # Sort by sort_name (name, then stack name, then instance ID)
+        instances.sort(key=lambda x: x['sort_name'].lower())
+        return instances
+        
     except Exception as e:
-        print(f"Error finding available EC2 instance: {str(e)}")
+        print(f"Error getting EC2 instances: {str(e)}")
+        return []
+
+def select_ec2_instance(instances, exclude_instance_id=None):
+    """Present a menu to select an EC2 instance"""
+    if not instances:
+        print("No EC2 instances with SSM agent found.")
         sys.exit(1)
+    
+    # Filter out the failed instance if specified
+    if exclude_instance_id:
+        instances = [inst for inst in instances if inst['id'] != exclude_instance_id]
+        if not instances:
+            print("No other EC2 instances available.")
+            sys.exit(1)
+    
+    # Don't show default instance info if we're excluding it (it failed)
+    if exclude_instance_id:
+        default_instance = None
+    else:
+        default_instance = get_default_ec2_instance()
+    
+    # Create choices with useful information
+    choices = []
+    for instance in instances:
+        # Create a descriptive choice string
+        name_display = instance['name'][:30] if len(instance['name']) > 30 else instance['name']
+        
+        # Build the choice string with useful tag info
+        choice_parts = [f"{instance['id']} - {name_display}"]
+        
+        # Add useful tag if available
+        if instance['useful_tag']:
+            choice_parts.append(f"({instance['useful_tag']})")
+        
+        choice = " ".join(choice_parts)
+        choices.append(choice)
+    
+    # Add option to use default if available
+    if default_instance:
+        print(f"\nDefault EC2 instance available: {default_instance}")
+        print("You can set to skip this selection:")
+        print("  export AWS_SSM_DEFAULT_EC2_INSTANCE=<instance-id>")
+        print("  export AWS_SSM_DEFAULT_EC2_NAME=<instance-name-or-stack-name>")
+    
+    questions = [
+        inquirer.List('selected_instance',
+                      message="Which EC2 instance do you want to use for port forwarding?",
+                      choices=choices)
+    ]
+    
+    try:
+        answers = inquirer.prompt(questions)
+        if answers is None:
+            print("\nSelection cancelled. Exiting.")
+            sys.exit(0)
+        selected_index = choices.index(answers['selected_instance'])
+        return instances[selected_index]
+    except KeyboardInterrupt:
+        print("\nOperation cancelled. Exiting.")
+        sys.exit(0)
+
+def find_available_ec2(region):
+    """Find an available EC2 instance with SSM for tunneling"""
+    # Get all instances with SSM
+    instances = get_ec2_instances_with_ssm()
+    
+    if not instances:
+        print("No EC2 instances with SSM agent found. Unable to create tunnel.")
+        sys.exit(1)
+    
+    # Check if we have a default instance from environment
+    default_instance = get_default_ec2_instance()
+    if default_instance:
+        print(f"Looking for default EC2 instance: {default_instance}")
+        
+        # First try to match by instance ID
+        instance_id = os.environ.get('AWS_SSM_DEFAULT_EC2_INSTANCE')
+        if instance_id:
+            for instance in instances:
+                if instance['id'] == instance_id:
+                    print(f"Found default EC2 instance by ID: {instance['id']} ({instance['name']})")
+                    print("To avoid this selection in the future, set:")
+                    print("  export AWS_SSM_DEFAULT_EC2_INSTANCE=<instance-id>")
+                    print("  export AWS_SSM_DEFAULT_EC2_NAME=<instance-name-or-stack-name>")
+                    return instance['id']
+            print(f"Warning: Default instance ID {instance_id} not found in available instances")
+        
+        # Then try to match by name/stack name
+        instance_name = os.environ.get('AWS_SSM_DEFAULT_EC2_NAME')
+        if instance_name:
+            # First try exact name match
+            for instance in instances:
+                if instance['name'] == instance_name:
+                    print(f"Found default EC2 instance by name: {instance['id']} ({instance['name']})")
+                    print("To avoid this selection in the future, set:")
+                    print("  export AWS_SSM_DEFAULT_EC2_INSTANCE=<instance-id>")
+                    print("  export AWS_SSM_DEFAULT_EC2_NAME=<instance-name-or-stack-name>")
+                    return instance['id']
+            
+            # Then try stack name match
+            for instance in instances:
+                stack_name = instance['tags'].get('aws:cloudformation:stack-name')
+                if stack_name == instance_name:
+                    print(f"Found default EC2 instance by stack name: {instance['id']} ({instance['name']}) [stack: {stack_name}]")
+                    print("To avoid this selection in the future, set:")
+                    print("  export AWS_SSM_DEFAULT_EC2_INSTANCE=<instance-id>")
+                    print("  export AWS_SSM_DEFAULT_EC2_NAME=<instance-name-or-stack-name>")
+                    return instance['id']
+            
+            print(f"Warning: Default instance name/stack '{instance_name}' not found in available instances")
+    
+    # Auto-select the first instance (sorted by name/stack)
+    instance = instances[0]
+    print(f"Using EC2 instance {instance['id']} ({instance['name']}) as tunnel endpoint")
+    return instance['id']
 
 def setup_port_forwarding(rds_endpoint, rds_port, local_port=None):
     """Setup port forwarding using an EC2 instance with SSM"""
@@ -328,8 +499,51 @@ def setup_port_forwarding(rds_endpoint, rds_port, local_port=None):
     
     signal.signal(signal.SIGINT, signal_handler)
     
-    # Start port forwarding
-    subprocess.run(cmd)
+    # Start port forwarding with retry logic
+    max_retries = 3
+    failed_instances = []
+    
+    for attempt in range(max_retries):
+        try:
+            print(f"Attempting connection with command: {' '.join(cmd)}")
+            print("Starting port forwarding session...")
+            
+            # Run the command and capture stderr to detect errors, but let stdout show in real-time
+            result = subprocess.run(cmd, check=True, stderr=subprocess.PIPE, text=True)
+            break
+            
+        except subprocess.CalledProcessError as e:
+            error_output = e.stderr if e.stderr else ""
+            
+            # Check if it's a TargetNotConnected error
+            if "TargetNotConnected" in error_output:
+                print(f"\nError: Instance {instance_id} is not connected to SSM.")
+                failed_instances.append(instance_id)
+                
+                if attempt < max_retries - 1:
+                    print("Connection failed. Please choose a different EC2 instance:")
+                    # Get a new instance, excluding failed ones
+                    instances = get_ec2_instances_with_ssm()
+                    if len(instances) > len(failed_instances):
+                        selected_instance = select_ec2_instance(instances, exclude_instance_id=instance_id)
+                        instance_id = selected_instance['id']
+                        print(f"Trying EC2 instance {instance_id} ({selected_instance['name']})...")
+                        # Rebuild the command with new instance
+                        cmd = [
+                            "aws", "ssm", "start-session",
+                            "--target", instance_id,
+                            "--document-name", "AWS-StartPortForwardingSessionToRemoteHost",
+                            "--parameters", f"localPortNumber={local_port},host={rds_endpoint},portNumber={rds_port}"
+                        ]
+                    else:
+                        print("No other EC2 instances available.")
+                        sys.exit(1)
+                else:
+                    print("Maximum retries reached. Please check your EC2 instances and try again.")
+                    sys.exit(1)
+            else:
+                # Re-raise if it's not a TargetNotConnected error
+                raise
 
 def main():
     parser = argparse.ArgumentParser(
@@ -348,7 +562,14 @@ Key use cases:
 
 The tool validates AWS credentials and SSM permissions, searches for MySQL RDS instances 
 by name or tags, and establishes port forwarding through an available EC2 instance with 
-SSM agent. It provides connection strings for local database clients.''',
+SSM agent. It provides connection strings for local database clients.
+
+Environment Variables:
+- AWS_SSM_DEFAULT_EC2_INSTANCE: Set to an EC2 instance ID to skip instance selection
+  Example: export AWS_SSM_DEFAULT_EC2_INSTANCE=i-1234567890abcdef0
+- AWS_SSM_DEFAULT_EC2_NAME: Set to an instance name or stack name to skip instance selection
+  Example: export AWS_SSM_DEFAULT_EC2_NAME=my-instance-name
+  Example: export AWS_SSM_DEFAULT_EC2_NAME=my-stack-name''',
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument('search_term', help='Search term to match RDS instance names, tags, or endpoints')
