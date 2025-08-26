@@ -4,6 +4,7 @@ import boto3
 from botocore import UNSIGNED
 from botocore.config import Config
 import sys
+import argparse
 
 def list_bucket_objects(bucket_name):
     # Create a Boto3 client for S3 with unsigned configuration
@@ -20,6 +21,29 @@ def list_bucket_objects(bucket_name):
     except Exception as e:
         print(f"An error occurred: {e}")
 
-# get bucket name from reading CLI first arg
-bucket_name = sys.argv[1]
-list_bucket_objects(bucket_name)
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(
+        description='''Public S3 bucket object listing tool.
+
+This tool lists objects in public S3 buckets without requiring AWS credentials, using 
+unsigned requests to access publicly readable buckets. It provides object metadata 
+including keys, last modified dates, and file sizes.
+
+Key use cases:
+- Public bucket exploration: List contents of publicly accessible S3 buckets
+- Content discovery: Find files in public data repositories
+- Security research: Audit public bucket contents for sensitive data
+- Data analysis: Access public datasets without authentication
+- Compliance: Document public bucket contents and access patterns
+
+The tool uses unsigned S3 requests to access buckets that have been configured for 
+public read access, making it useful for exploring public data sources or auditing 
+public bucket configurations. It provides basic object metadata without requiring 
+AWS credentials or permissions.''',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument('bucket_name', help='Public S3 bucket name')
+    args = parser.parse_args()
+    
+    bucket_name = args.bucket_name
+    list_bucket_objects(bucket_name)

@@ -365,7 +365,25 @@ def write_key_to_file(key, content, output_path, expiration=None):
         print(f"Error writing key '{key}' to {output_path}: {e}", file=sys.stderr)
 
 def main():
-    parser = argparse.ArgumentParser(description='Extract keys from Memcached and save to files with appropriate extensions')
+    parser = argparse.ArgumentParser(
+        description='''Memcached key extraction and content analysis tool.
+
+This tool extracts specific keys from a Memcached instance and saves their content to files with 
+appropriate extensions based on content type detection. It supports various data formats including 
+JSON, YAML, images, and binary data, with special handling for Ruby Marshal serialized objects.
+
+Key use cases:
+- Data recovery: Extract specific keys from Memcached for backup or analysis
+- Debugging: Inspect cached data to understand application behavior
+- Content analysis: Automatically detect and properly format different data types
+- Ruby application support: Handle ActiveSupport::Cache::Entry serialized objects
+- Binary data handling: Properly extract and save images and other binary content
+
+The tool automatically detects content types (JSON, YAML, PNG, JPG, GIF, etc.) and applies appropriate 
+file extensions. It handles Ruby Marshal deserialization for Rails applications and provides expiration 
+information for each extracted key. Supports both single key extraction and batch processing of multiple keys.''',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument('-H', '--host', required=True, help='Memcached hostname')
     parser.add_argument('-p', '--port', type=int, default=11211, help='Memcached port (default: 11211)')
     parser.add_argument('-o', '--output', required=True, help='Output file or directory path')

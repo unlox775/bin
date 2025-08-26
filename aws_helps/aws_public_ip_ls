@@ -4,6 +4,7 @@ import boto3
 import sys
 import os
 import socket
+import argparse
 
 def list_public_ips(profile_name, region):
     session = boto3.Session(profile_name=profile_name, region_name=region)
@@ -88,11 +89,32 @@ def list_public_ips(profile_name, region):
     print("\n")
 
 if __name__ == '__main__':
-    if len(sys.argv) < 3:
-        print("Usage: script_name.py <profile_name> <region>")
-        sys.exit(1)
-    profile_name = sys.argv[1]
-    region = sys.argv[2]
+    parser = argparse.ArgumentParser(
+        description='''AWS public IP inventory and network exposure analysis tool.
+
+This tool scans AWS resources to identify all public IP addresses and internet-facing 
+endpoints across multiple services including EC2 instances, load balancers, RDS databases, 
+and Elastic IPs. It's designed for security audits, network documentation, and compliance reporting.
+
+Key use cases:
+- Security audits: Identify all public-facing resources in an AWS account
+- Network documentation: Document public IP addresses and their associated resources
+- Compliance: Audit internet exposure for security and compliance requirements
+- Asset inventory: Create comprehensive lists of public-facing assets
+- Risk assessment: Identify potential security exposure points
+
+The tool provides detailed information about each public IP including the associated 
+resource type, identifier, and additional context like instance names or database 
+endpoints. It covers EC2 instances, Classic and Application Load Balancers, RDS 
+instances, and Elastic IP addresses.''',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument('profile_name', help='AWS profile name')
+    parser.add_argument('region', help='AWS region')
+    args = parser.parse_args()
+    
+    profile_name = args.profile_name
+    region = args.region
     os.environ['AWS_PROFILE'] = profile_name
     os.environ['AWS_REGION'] = region
     list_public_ips(profile_name, region)

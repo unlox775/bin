@@ -190,7 +190,23 @@ def inspect_other_logs(cursor, target_user: str, limit=1000):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Inspect usage and ownership details for a given Redshift user."
+        description='''Redshift user analysis and cleanup preparation tool.
+
+This tool provides comprehensive analysis of AWS Redshift users by examining their database footprint, 
+ownership, and activity across multiple databases. It's designed to help with user lifecycle management, 
+especially when preparing to remove or deactivate users.
+
+Key use cases:
+- User cleanup: Identify all objects and dependencies before dropping a user
+- Security audits: Review user activity and ownership across databases
+- Compliance: Document user access and usage patterns
+- Troubleshooting: Understand user permissions and group memberships
+- Migration: Assess user impact before role changes
+
+The tool examines owned objects, group memberships, active sessions, stored procedures, login events, 
+and recent queries to provide a complete picture of user activity and dependencies. It also identifies 
+potential blockers that would prevent successful user deletion.''',
+        formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument(
         "--conn",

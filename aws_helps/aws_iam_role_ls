@@ -20,7 +20,22 @@ cfn_cache = {
 }
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='List AWS IAM roles and their associated resources')
+    parser = argparse.ArgumentParser(
+        description='''Comprehensive IAM role analysis and resource mapping tool.
+
+This tool provides detailed insights into AWS IAM roles by discovering where they are used across your AWS infrastructure. 
+It identifies roles used by EC2 instances, Lambda functions, ECS tasks/services, CloudFormation stacks, and other AWS resources.
+
+Key use cases:
+- Security audits: Find all resources using a specific role
+- Cleanup operations: Identify unused roles before deletion
+- Compliance: Map role usage across your infrastructure
+- Troubleshooting: Understand role dependencies and associations
+
+The tool performs cross-service analysis to build a complete picture of role usage, including CloudFormation 
+stack relationships and resource associations. Results are cached for performance when analyzing multiple roles.''',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument('role_names', nargs='*',
                         help='Specific IAM role names to inspect (optional, if not provided all roles are listed)')
     parser.add_argument('--profile', '-p',

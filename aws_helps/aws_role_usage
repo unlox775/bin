@@ -3,15 +3,36 @@
 import boto3
 import sys
 import os
+import argparse
 
-# Read the command line args for region and profile, defaulting to 'us-east-1' and 'default'.
-region_name = sys.argv[1] if len(sys.argv) > 1 else 'us-east-1'
-profile_name = sys.argv[2] if len(sys.argv) > 2 else 'default'
-role_name = sys.argv[3] if len(sys.argv) > 3 else None
+def main():
+    parser = argparse.ArgumentParser(
+        description='''IAM role usage analysis and resource mapping tool.
 
-if not role_name:
-    print("Please provide an IAM role name as an argument.")
-    sys.exit(1)
+This tool identifies which AWS resources are using a specific IAM role, including 
+EC2 instances and Lambda functions. It's designed for role management, security 
+audits, and understanding role dependencies across your AWS infrastructure.
+
+Key use cases:
+- Role dependency analysis: Find all resources using a specific role
+- Security audits: Understand role usage patterns and permissions
+- Cleanup operations: Identify resources before role deletion
+- Compliance: Document role usage across services
+- Troubleshooting: Understand role assignments and permissions
+
+The tool checks EC2 instances for instance profile usage and Lambda functions for 
+execution role assignments, providing a comprehensive view of where a specific role 
+is being used across your AWS infrastructure.''',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument('role_name', help='IAM role name to analyze')
+    parser.add_argument('region', help='AWS region (default: us-east-1)', nargs='?', default='us-east-1')
+    parser.add_argument('profile', help='AWS profile name (default: default)', nargs='?', default='default')
+    args = parser.parse_args()
+
+    region_name = args.region
+    profile_name = args.profile
+    role_name = args.role_name
 
 print(f"Using region: {region_name}, profile: {profile_name}, role: {role_name}")
 os.environ['AWS_PROFILE'] = profile_name

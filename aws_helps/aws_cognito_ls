@@ -3,6 +3,7 @@
 import boto3
 import sys
 import os
+import argparse
 
 def list_cognito_pools(region, profile):
     # Set up boto3 session using provided profile
@@ -17,13 +18,31 @@ def list_cognito_pools(region, profile):
     return response.get('IdentityPools', [])
 
 def main():
-    # Check command line arguments
-    if len(sys.argv) < 2:
-        print("Usage: aws_eni_ls <eni-id> [region] [profile]")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description='''AWS Cognito Identity Pool inventory tool.
 
-    region = sys.argv[1] if len(sys.argv) > 1 else 'us-east-1'
-    profile = sys.argv[2] if len(sys.argv) > 2 else 'default'
+This tool lists all Cognito Identity Pools in a specified region, providing key information 
+about pool IDs and names. It's designed for Cognito service management, user authentication 
+audits, and identity provider documentation.
+
+Key use cases:
+- Identity pool inventory: List all Cognito Identity Pools in an account
+- Authentication audit: Document identity providers and pools
+- Application management: Identify pools used by different applications
+- Cleanup operations: Find unused or outdated identity pools
+- Compliance: Audit identity provider configurations
+
+The tool provides a simple inventory of all Cognito Identity Pools, making it easy to 
+understand the scope of user authentication services in your AWS account. It handles 
+AWS API pagination limits and provides clear output for each pool.''',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument('region', help='AWS region (default: us-east-1)', nargs='?', default='us-east-1')
+    parser.add_argument('profile', help='AWS profile name (default: default)', nargs='?', default='default')
+    args = parser.parse_args()
+
+    region = args.region
+    profile = args.profile
 
     os.environ['AWS_PROFILE'] = profile
     os.environ['AWS_REGION'] = region

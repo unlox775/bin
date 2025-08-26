@@ -46,7 +46,7 @@ This directory contains various AWS command-line helper scripts organized by ser
 ## Database & Analytics
 
 - `aws_athena_run_query`: Run SQL queries on AWS Athena and output results.
-    - Usage: `aws_athena_run_query <aws_profile> <region> <database>`
+    - Usage: `echo "SELECT ..." | aws_athena_run_query <aws_profile> <region> <database>`
 - `aws_rds_mysql_ssm_port_forward`: Set up SSM port forwarding to RDS MySQL instances.
     - Usage: `aws_rds_mysql_ssm_port_forward <search_term>`
 - `aws_redshift_inspect_user`: Inspect usage and ownership details for a given Redshift user, including role memberships, active sessions, stored procs, and more.

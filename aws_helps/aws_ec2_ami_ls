@@ -3,6 +3,7 @@
 import boto3
 import sys
 import os
+import argparse
 
 def list_ec2_amis(region, profile):
     # Set up boto3 session using provided profile
@@ -17,13 +18,31 @@ def list_ec2_amis(region, profile):
     return response.get('Images', [])
 
 def main():
-    # Check command line arguments
-    if len(sys.argv) < 2:
-        print("Usage: aws_ami_ls <region> [profile]")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description='''EC2 AMI inventory and management tool.
 
-    region = sys.argv[1] if len(sys.argv) > 1 else 'us-east-1'
-    profile = sys.argv[2] if len(sys.argv) > 2 else 'default'
+This tool lists all EC2 AMIs owned by the current account in a specified region, providing 
+key information about image types, public/private status, and root device configurations. 
+It's designed for AMI management, cleanup operations, and infrastructure documentation.
+
+Key use cases:
+- AMI inventory: List all custom AMIs in an account
+- Cleanup operations: Identify unused or outdated AMIs
+- Infrastructure documentation: Document AMI usage and types
+- Cost optimization: Find AMIs that may be candidates for deregistration
+- Compliance: Audit AMI ownership and public/private status
+
+The tool sorts AMIs by public status (public first) and root device type, making it easy 
+to identify different types of images and their accessibility. It focuses on AMIs owned 
+by the current account for security and management purposes.''',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument('region', help='AWS region (default: us-east-1)', nargs='?', default='us-east-1')
+    parser.add_argument('profile', help='AWS profile name (default: default)', nargs='?', default='default')
+    args = parser.parse_args()
+
+    region = args.region
+    profile = args.profile
 
     os.environ['AWS_PROFILE'] = profile
     os.environ['AWS_REGION'] = region

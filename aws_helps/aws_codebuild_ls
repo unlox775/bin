@@ -3,6 +3,7 @@
 import boto3
 import sys
 import os
+import argparse
 
 def list_codebuild_projects(region, profile):
     session = boto3.Session(profile_name=profile, region_name=region)
@@ -47,13 +48,31 @@ def list_codebuild_projects(region, profile):
     print("Done listing projects.")
 
 def main():
-    # Check command line arguments
-    if len(sys.argv) < 2:
-        print("Usage: aws_codebuild_ls <region> [profile]")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description='''AWS CodeBuild project inventory and analysis tool.
 
-    region = sys.argv[1] if len(sys.argv) > 1 else 'us-east-1'
-    profile = sys.argv[2] if len(sys.argv) > 2 else 'default'
+This tool lists all CodeBuild projects in a specified region, providing detailed information 
+about project configurations, source repositories, build specifications, and webhook settings. 
+It's designed for CI/CD pipeline management and build system documentation.
+
+Key use cases:
+- Build pipeline inventory: List all CodeBuild projects in an account
+- CI/CD audit: Document build configurations and triggers
+- Repository mapping: Identify which repositories are connected to builds
+- Webhook analysis: Understand build triggers and event patterns
+- Build system documentation: Document build specifications and configurations
+
+The tool provides comprehensive details about each CodeBuild project including source 
+repository information, build specification files, webhook configurations, and event 
+filters. It's particularly useful for understanding GitHub integration and build triggers.''',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument('region', help='AWS region (default: us-east-1)', nargs='?', default='us-east-1')
+    parser.add_argument('profile', help='AWS profile name (default: default)', nargs='?', default='default')
+    args = parser.parse_args()
+
+    region = args.region
+    profile = args.profile
 
     os.environ['AWS_PROFILE'] = profile
     os.environ['AWS_REGION'] = region

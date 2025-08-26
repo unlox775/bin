@@ -2,6 +2,7 @@
 
 import boto3
 import sys
+import argparse
 from botocore.exceptions import ClientError
 
 def test_s3_access(s3_client):
@@ -26,11 +27,30 @@ def test_iam_access(iam_client):
         print(f"Access to list IAM users: FAILED. Error: {e}")
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: aws_check_access <Access Key ID>")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description='''AWS credential validation and access testing tool.
 
-    access_key_id = sys.argv[1]
+This tool validates AWS credentials by testing access to key AWS services including S3, 
+Secrets Manager, and IAM. It provides immediate feedback on credential validity and 
+permissions without requiring complex setup or configuration.
+
+Key use cases:
+- Secret access key is prompted for, so it doesn't get logged in command history or become visible to ps
+- Credential validation: Quickly test if AWS credentials are valid and working
+- Permission verification: Check access to specific AWS services
+- Troubleshooting: Diagnose authentication or authorization issues
+- Security audits: Verify credential scope and permissions
+- Onboarding: Test new user credentials and access levels
+
+The tool tests read access to S3 buckets, Secrets Manager secrets, and IAM users, 
+providing clear success/failure messages for each service. It also displays account 
+metadata including Account ID, User ARN, and User ID for identity verification.''',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument('access_key_id', help='AWS Access Key ID to test')
+    args = parser.parse_args()
+
+    access_key_id = args.access_key_id
     secret_access_key = input("Enter Secret Access Key: ")
 
     session = boto3.Session(

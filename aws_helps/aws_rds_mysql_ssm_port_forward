@@ -7,6 +7,7 @@ import os
 import signal
 import subprocess
 import botocore.exceptions
+import argparse
 
 def check_aws_access():
     """Check if we have valid AWS credentials and permissions for SSM sessions"""
@@ -331,27 +332,37 @@ def setup_port_forwarding(rds_endpoint, rds_port, local_port=None):
     subprocess.run(cmd)
 
 def main():
-    # Print usage if no search term is provided
-    if len(sys.argv) < 2:
-        print("Usage: aws_rds_mysql_ssm_port_forward <search_term> [local_port]")
-        print("  <search_term>: String to match RDS instance names")
-        print("  [local_port]: Optional local port to use (default: 13306)")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description='''RDS MySQL port forwarding tool using AWS Systems Manager.
+
+This tool establishes secure port forwarding to RDS MySQL instances through AWS Systems 
+Manager (SSM), allowing local database connections without requiring VPN or bastion hosts. 
+It searches for MySQL RDS instances and provides an interactive selection menu.
+
+Key use cases:
+- Database access: Connect to RDS MySQL instances from local development environments
+- Secure tunneling: Access private RDS instances without VPN or public endpoints
+- Development: Local database connections for application development
+- Troubleshooting: Direct database access for debugging and maintenance
+- Multi-account access: Connect to RDS instances across different AWS accounts
+
+The tool validates AWS credentials and SSM permissions, searches for MySQL RDS instances 
+by name or tags, and establishes port forwarding through an available EC2 instance with 
+SSM agent. It provides connection strings for local database clients.''',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument('search_term', help='Search term to match RDS instance names, tags, or endpoints')
+    parser.add_argument('local_port', help='Local port for forwarding (default: 13306)', nargs='?', type=int, default=13306)
+    args = parser.parse_args()
 
     # Get search term from first CLI arg
-    search_term = sys.argv[1]
+    search_term = args.search_term
     
     # Get optional local port from second CLI arg
-    local_port = None
-    if len(sys.argv) > 2:
-        try:
-            local_port = int(sys.argv[2])
-            if local_port < 1024 or local_port > 65535:
-                print("ERROR: Local port must be between 1024 and 65535")
-                sys.exit(1)
-        except ValueError:
-            print(f"ERROR: Invalid port number: {sys.argv[2]}")
-            sys.exit(1)
+    local_port = args.local_port
+    if local_port < 1024 or local_port > 65535:
+        print("ERROR: Local port must be between 1024 and 65535")
+        sys.exit(1)
     
     # Check AWS access before proceeding - this now checks SSM permissions too
     check_aws_access()

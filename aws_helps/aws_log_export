@@ -58,7 +58,24 @@ def export_logs(profile, region, log_group, log_stream, start_time, end_time):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Export AWS logs to stdout.")
+    parser = argparse.ArgumentParser(
+        description='''AWS CloudWatch log export and analysis tool.
+
+This tool exports AWS CloudWatch logs from specific log groups and streams to stdout in JSON format, 
+making it easy to pipe into other tools for analysis, filtering, or processing. It handles pagination 
+automatically and provides progress feedback during large exports.
+
+Key use cases:
+- Log analysis: Export logs for offline analysis or processing
+- Incident investigation: Extract logs for specific time periods
+- Data pipeline integration: Feed logs into monitoring or alerting systems
+- Compliance: Export logs for audit or compliance requirements
+- Debugging: Extract logs for troubleshooting specific issues
+
+The tool uses the AWS CLI under the hood for reliable log retrieval and supports time-based filtering 
+with automatic timezone conversion. Output is streamed to stdout for easy integration with Unix pipelines.''',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("profile", help="AWS profile name")
     parser.add_argument("region", help="AWS region")
     parser.add_argument("log_group", help="Log group name")

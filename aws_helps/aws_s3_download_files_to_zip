@@ -5,6 +5,7 @@ import boto3
 from io import BytesIO
 import zipfile
 import os
+import argparse
 
 def download_files_to_zip(output_zip_name, profile_name, region, bucket_name, *object_keys):
     # Initialize a session using AWS profile
@@ -32,15 +33,37 @@ def download_files_to_zip(output_zip_name, profile_name, region, bucket_name, *o
         f.write(zip_buffer.getvalue())
 
 if __name__ == '__main__':
-    if len(sys.argv) < 6:
-        print("Usage: aws_s3_download_files_to_zip [output zip file name] [AWS-profile] [aws-region] [s3-bucket-name] [object-key-one] [object-key-two] ...")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description='''S3 file batch download and ZIP creation tool.
+
+This tool downloads multiple files from an S3 bucket and packages them into a single ZIP file. 
+It's designed for batch operations where you need to retrieve multiple objects and combine them 
+into a compressed archive for easier handling or distribution.
+
+Key use cases:
+- Batch downloads: Download multiple S3 objects in a single operation
+- Data packaging: Create ZIP archives of related S3 files
+- Backup operations: Package multiple files for backup or transfer
+- Distribution: Bundle files for sharing or deployment
+- Data processing: Prepare file collections for analysis or processing
+
+The tool downloads each specified S3 object and adds it to a ZIP file with the original key 
+structure preserved. It provides progress feedback during downloads and creates a single 
+compressed output file containing all requested objects.''',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument('output_zip_name', help='Output ZIP file name')
+    parser.add_argument('profile_name', help='AWS profile name')
+    parser.add_argument('region', help='AWS region')
+    parser.add_argument('bucket_name', help='S3 bucket name')
+    parser.add_argument('object_keys', nargs='+', help='S3 object keys to download')
+    args = parser.parse_args()
     
-    output_zip_name = sys.argv[1]
-    profile_name = sys.argv[2]
-    region = sys.argv[3]
-    bucket_name = sys.argv[4]
-    object_keys = sys.argv[5:]
+    output_zip_name = args.output_zip_name
+    profile_name = args.profile_name
+    region = args.region
+    bucket_name = args.bucket_name
+    object_keys = args.object_keys
 
     # Set AWS profile and region environment variables
     os.environ['AWS_PROFILE'] = profile_name

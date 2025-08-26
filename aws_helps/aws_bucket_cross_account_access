@@ -4,6 +4,7 @@ import boto3
 import sys
 import os
 import json
+import argparse
 
 def list_buckets(region, profile):
     session = boto3.Session(region_name=region, profile_name=profile)
@@ -38,12 +39,31 @@ def analyze_policy(policy, current_account_id):
     return cross_account_principals
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: aws_bucket_cross_account_access <region> [profile]")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description='''S3 bucket cross-account access analysis tool.
 
-    region = sys.argv[1]
-    profile = sys.argv[2] if len(sys.argv) > 2 else 'default'
+This tool analyzes S3 bucket policies to identify cross-account access patterns and 
+external principals that have permissions to access bucket resources. It's designed 
+for security audits, compliance reporting, and understanding bucket sharing across AWS accounts.
+
+Key use cases:
+- Security audits: Identify buckets with cross-account access
+- Compliance reporting: Document bucket sharing and access patterns
+- Access monitoring: Track which buckets are shared with external accounts
+- Risk assessment: Identify potential security exposure through bucket sharing
+- Cleanup operations: Find buckets that may have unnecessary cross-account access
+
+The tool examines bucket policies to identify principals from other AWS accounts, 
+provides detailed information about access permissions, and helps identify potential 
+security risks related to cross-account bucket access.''',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument('region', help='AWS region')
+    parser.add_argument('profile', help='AWS profile name (default: default)', nargs='?', default='default')
+    args = parser.parse_args()
+
+    region = args.region
+    profile = args.profile
 
     os.environ['AWS_PROFILE'] = profile
     os.environ['AWS_REGION'] = region

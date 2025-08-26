@@ -5,6 +5,7 @@ import boto3
 import time
 import csv
 import signal
+import argparse
 from botocore.exceptions import ClientError
 
 def handle_sigint(signum, frame):
@@ -49,11 +50,31 @@ def download_and_print_results(s3_path):
         csv_writer.writerow(row)
 
 if __name__ == "__main__":
-    if len(sys.argv) < 4:
-        print("Usage: aws_s3_run_athena_query <aws_profile> <region> <database>", file=sys.stderr)
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description='''AWS Athena query execution and result streaming tool.
 
-    aws_profile, region, database = sys.argv[1:]
+This tool executes SQL queries against AWS Athena and streams the results directly to stdout 
+in CSV format. It handles query lifecycle management including execution, monitoring, and 
+result retrieval, making it ideal for integration with data pipelines and analysis tools.
+
+Key use cases:
+- Data analysis: Execute SQL queries and stream results for processing
+- ETL pipelines: Integrate Athena queries into data workflows
+- Reporting: Generate reports from S3 data through Athena
+- Interactive analysis: Quick query execution with immediate results
+- Automation: Script Athena queries for scheduled data processing
+
+The tool reads SQL queries from stdin, executes them against the specified database, monitors 
+execution progress, and streams results as CSV to stdout. It supports query cancellation via 
+SIGINT and reads S3 output location from the AWS_ATHENA_RESULTS_BUCKET environment variable.''',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument('aws_profile', help='AWS profile name to use')
+    parser.add_argument('region', help='AWS region for Athena service')
+    parser.add_argument('database', help='Athena database name to query')
+    args = parser.parse_args()
+
+    aws_profile, region, database = args.aws_profile, args.region, args.database
     session = boto3.Session(profile_name=aws_profile, region_name=region)
     client = session.client('athena')
 

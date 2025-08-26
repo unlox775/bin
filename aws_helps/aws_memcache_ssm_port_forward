@@ -7,6 +7,7 @@ import os
 import signal
 import subprocess
 import botocore.exceptions
+import argparse
 
 def check_aws_access():
     """Check if we have valid AWS credentials and permissions for SSM sessions"""
@@ -208,11 +209,31 @@ def setup_port_forwarding(memcache_endpoint, memcache_port, local_port=None):
     subprocess.run(cmd)
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: aws_memcache_ssm_port_forward <search_term> [local_port]")
-        sys.exit(1)
-    search_term = sys.argv[1]
-    local_port = int(sys.argv[2]) if len(sys.argv) > 2 else None
+    parser = argparse.ArgumentParser(
+        description='''Memcache port forwarding tool using AWS Systems Manager.
+
+This tool establishes secure port forwarding to Memcache clusters through AWS Systems 
+Manager (SSM), allowing local cache access without requiring VPN or bastion hosts. 
+It searches for Memcache clusters in ElastiCache and provides an interactive selection menu.
+
+Key use cases:
+- Cache access: Connect to Memcache clusters from local development environments
+- Secure tunneling: Access private Memcache clusters without VPN or public endpoints
+- Development: Local cache connections for application development
+- Troubleshooting: Direct cache access for debugging and maintenance
+- Multi-account access: Connect to Memcache clusters across different AWS accounts
+
+The tool validates AWS credentials and SSM permissions, searches for Memcache clusters 
+in ElastiCache by name or endpoint, and establishes port forwarding through an available 
+EC2 instance with SSM agent. It provides connection examples for cache management tools.''',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument('search_term', help='Search term to match Memcache cluster names or endpoints')
+    parser.add_argument('local_port', help='Local port for forwarding (default: 11211)', nargs='?', type=int, default=11211)
+    args = parser.parse_args()
+    
+    search_term = args.search_term
+    local_port = args.local_port
     check_aws_access()
     clusters = get_memcache_clusters(search_term)
     selected = select_memcache_cluster(clusters)

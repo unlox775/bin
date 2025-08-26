@@ -3,21 +3,41 @@
 import boto3
 import sys
 import os
+import argparse
 
-# Check if the CLI arguments are provided and set the region and profile variables accordingly.
-# argv[0] is always the script name, so we start checking from argv[1].
+def main():
+    parser = argparse.ArgumentParser(
+        description='''AWS Security Group analysis and resource mapping tool.
 
-# Read the first command line arg as the region name; default to 'us-east-1'
-region_name = sys.argv[1] if len(sys.argv) > 1 else 'us-east-1'
+This tool provides comprehensive analysis of AWS Security Groups, including detailed 
+rule configurations, associated resources, and cross-references between security groups. 
+It's designed for network security audits, infrastructure documentation, and compliance reporting.
 
-# Read the second command line arg as the profile name; default to 'default'
-profile_name = sys.argv[2] if len(sys.argv) > 2 else 'default'
-print(f"Using region: {region_name}, profile: {profile_name}")
-# set AWS_PROFILE and AWS_REGION environment variables, so aws-google gets them
-os.environ['AWS_PROFILE'] = profile_name
-os.environ['AWS_REGION'] = region_name
+Key use cases:
+- Security audits: Analyze security group rules and access patterns
+- Resource mapping: Identify which resources use specific security groups
+- Network documentation: Document security group configurations and dependencies
+- Compliance: Audit network security configurations and access controls
+- Cleanup operations: Identify unused security groups and dependencies
 
-session = boto3.Session(profile_name=profile_name, region_name=region_name)
+The tool examines security group rules, identifies associated resources across multiple 
+AWS services (EC2, RDS, Lambda, ELB, etc.), and provides detailed analysis of port 
+ranges, protocols, and cross-security group references.''',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument('region', help='AWS region (default: us-east-1)', nargs='?', default='us-east-1')
+    parser.add_argument('profile', help='AWS profile name (default: default)', nargs='?', default='default')
+    args = parser.parse_args()
+
+    region_name = args.region
+    profile_name = args.profile
+    
+    print(f"Using region: {region_name}, profile: {profile_name}")
+    # set AWS_PROFILE and AWS_REGION environment variables, so aws-google gets them
+    os.environ['AWS_PROFILE'] = profile_name
+    os.environ['AWS_REGION'] = region_name
+
+    session = boto3.Session(profile_name=profile_name, region_name=region_name)
 
 
 def get_associated_resources(sg_id):

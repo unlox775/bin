@@ -5,6 +5,7 @@ from botocore.config import Config
 import sys
 import random
 import string
+import argparse
 
 def put_object_to_bucket(bucket_name, object_name):
     # Create a Boto3 client for S3 with unsigned configuration
@@ -24,7 +25,30 @@ def put_object_to_bucket(bucket_name, object_name):
     except Exception as e:
         print(f"An error occurred: {e}")
 
-# Get bucket name and object name from command line arguments
-bucket_name = sys.argv[1]
-object_name = sys.argv[2]
-put_object_to_bucket(bucket_name, object_name)
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(
+        description='''Public S3 bucket object upload tool.
+
+This tool uploads objects to public S3 buckets that allow public write access, using 
+unsigned requests to test bucket permissions and configurations. It generates random 
+content for testing purposes.
+
+Key use cases:
+- Security testing: Test public bucket write permissions
+- Bucket configuration validation: Verify bucket access policies
+- Penetration testing: Assess bucket security configurations
+- Research: Test public bucket capabilities and limitations
+- Compliance: Audit public bucket write access
+
+The tool generates random content and attempts to upload it to the specified bucket 
+and object key. It's useful for testing bucket permissions and understanding public 
+bucket configurations, particularly for security assessment and compliance purposes.''',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument('bucket_name', help='Public S3 bucket name')
+    parser.add_argument('object_name', help='Object key name for upload')
+    args = parser.parse_args()
+    
+    bucket_name = args.bucket_name
+    object_name = args.object_name
+    put_object_to_bucket(bucket_name, object_name)

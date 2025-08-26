@@ -3,6 +3,7 @@
 import boto3
 import sys
 import os
+import argparse
 from urllib.parse import urlparse
 
 def list_files(bucket_name, prefix):
@@ -24,13 +25,33 @@ def parse_s3_url(s3_url):
     return bucket_name, prefix
 
 if __name__ == '__main__':
-    if len(sys.argv) < 4:
-        print("Usage: aws_s3_list_all_filenames <profile_name> <region> <s3-url>")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description='''S3 bucket file enumeration and listing tool.
 
-    profile_name = sys.argv[1]
-    region = sys.argv[2]
-    s3_url = sys.argv[3]
+This tool lists all files in an S3 bucket or prefix, providing a complete inventory 
+of objects stored in S3. It supports pagination to handle large buckets and can 
+filter by prefix to focus on specific directories or file patterns.
+
+Key use cases:
+- File inventory: Get complete lists of files in S3 buckets
+- Backup verification: Verify file presence and structure
+- Data analysis: Understand file distribution and patterns
+- Cleanup operations: Identify files for deletion or archival
+- Migration planning: Document file structures for data migration
+
+The tool uses S3's pagination API to efficiently handle buckets with millions of 
+objects and provides simple, clean output suitable for further processing or analysis. 
+It supports S3 URL format for easy specification of bucket and prefix combinations.''',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument('profile_name', help='AWS profile name')
+    parser.add_argument('region', help='AWS region')
+    parser.add_argument('s3_url', help='S3 URL (e.g., s3://bucket-name/prefix/)')
+    args = parser.parse_args()
+
+    profile_name = args.profile_name
+    region = args.region
+    s3_url = args.s3_url
 
     # Set AWS profile and region environment variables
     os.environ['AWS_PROFILE'] = profile_name

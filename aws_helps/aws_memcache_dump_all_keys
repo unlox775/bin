@@ -16,7 +16,25 @@ def send_command(s, command):
     return data.decode('utf-8')
 
 def main():
-    parser = argparse.ArgumentParser(description='Dump all Memcached keys to a .gz file.')
+    parser = argparse.ArgumentParser(
+        description='''Memcached key enumeration and backup tool.
+
+This tool dumps all accessible keys from a Memcached instance to a compressed file, providing a 
+complete inventory of cached data. It uses Memcached's internal slab statistics to enumerate keys 
+and provides detailed statistics about the cache state.
+
+Key use cases:
+- Cache inventory: Get a complete list of all keys in Memcached
+- Backup preparation: Create a key list before cache operations
+- Performance analysis: Understand cache utilization and key distribution
+- Debugging: Identify what data is currently cached
+- Monitoring: Track cache growth and key patterns over time
+
+The tool provides comprehensive statistics including current items, total items ever stored, 
+and the percentage of accessible keys. It handles Memcached's slab-based memory management 
+and explains limitations of key enumeration due to expiration and eviction policies.''',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument('-H', '--host', required=True, help='Memcached hostname')
     parser.add_argument('-p', '--port', type=int, default=11211, help='Memcached port (default: 11211)')
     parser.add_argument('-o', '--output', required=True, help='Output .gz file path')

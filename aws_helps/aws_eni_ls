@@ -3,6 +3,7 @@
 import boto3
 import sys
 import os
+import argparse
 
 def describe_eni(eni_id, region='us-east-1', profile='default'):
     # Initialize boto3 session and clients
@@ -99,14 +100,33 @@ def describe_eni(eni_id, region='us-east-1', profile='default'):
             print(f"  Secondary Private IP: {private_ip['PrivateIpAddress']}")
 
 if __name__ == "__main__":
-    # Check command line arguments
-    if len(sys.argv) < 2:
-        print("Usage: aws_eni_ls <eni-id> [region] [profile]")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description='''EC2 Network Interface (ENI) analysis and security audit tool.
 
-    eni_id = sys.argv[1]
-    region = sys.argv[2] if len(sys.argv) > 2 else 'us-east-1'
-    profile = sys.argv[3] if len(sys.argv) > 3 else 'default'
+This tool provides comprehensive analysis of EC2 Network Interfaces, including detailed 
+security group configurations, attachment information, and network configuration details. 
+It's designed for network troubleshooting, security audits, and infrastructure documentation.
+
+Key use cases:
+- Network troubleshooting: Analyze ENI configurations and attachments
+- Security audits: Review security group rules and network access
+- Infrastructure documentation: Document network interface configurations
+- Attachment analysis: Understand which resources are using specific ENIs
+- Compliance: Audit network security configurations and access patterns
+
+The tool provides detailed information about security group rules (both inbound and outbound), 
+ENI attachments to EC2 instances or other resources, network configuration including IP 
+addresses, and additional settings like source/destination checking.''',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument('eni_id', help='ENI ID to analyze')
+    parser.add_argument('region', help='AWS region (default: us-east-1)', nargs='?', default='us-east-1')
+    parser.add_argument('profile', help='AWS profile name (default: default)', nargs='?', default='default')
+    args = parser.parse_args()
+
+    eni_id = args.eni_id
+    region = args.region
+    profile = args.profile
 
     os.environ['AWS_PROFILE'] = profile
     os.environ['AWS_REGION'] = region

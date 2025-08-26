@@ -7,7 +7,22 @@ import sys
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description='List custom IAM policies and their usage attachments and boundaries'
+        description='''IAM policy analysis and attachment mapping tool.
+
+This tool provides comprehensive analysis of AWS IAM policies by discovering where they are attached across your 
+AWS account. It distinguishes between direct policy attachments (permissions) and permission boundaries, 
+which is crucial for understanding the effective permissions of IAM entities.
+
+Key use cases:
+- Security audits: Identify all entities using a specific policy
+- Permission analysis: Distinguish between direct attachments and boundaries
+- Cleanup operations: Find unused policies before deletion
+- Compliance: Map policy usage across users, roles, and groups
+- Troubleshooting: Understand policy dependencies and inheritance
+
+The tool analyzes both custom (local) policies and their attachments to users, roles, and groups, 
+providing clear visibility into your IAM permission structure.''',
+        formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument(
         '--profile', '-p',
