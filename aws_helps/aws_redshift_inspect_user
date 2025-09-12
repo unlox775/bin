@@ -75,7 +75,7 @@ def inspect_login_events(cursor, target_user: str, limit=5000):
     rows = cursor.fetchall()
     return rows
 
-def inspect_recent_queries(cursor, target_user: str, limit=50):
+def inspect_recent_queries(cursor, target_user: str, limit=500000):
     """
     Show recent queries run by the target user from stl_query.
     """

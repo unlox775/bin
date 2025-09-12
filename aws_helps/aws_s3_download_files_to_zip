@@ -6,31 +6,82 @@ from io import BytesIO
 import zipfile
 import os
 import argparse
+import fnmatch
+
+def expand_glob_patterns(s3, bucket_name, object_keys):
+    """Expand glob patterns in object keys to actual S3 object keys"""
+    expanded_keys = []
+    
+    for key in object_keys:
+        if '*' in key or '?' in key:
+            # This is a glob pattern, need to expand it
+            print(f"Expanding glob pattern: {key}")
+            
+            # Extract prefix for more efficient listing
+            prefix = key.split('*')[0].split('?')[0]
+            if not prefix:
+                prefix = ""
+            
+            # List objects with the prefix
+            paginator = s3.get_paginator('list_objects_v2')
+            page_iterator = paginator.paginate(Bucket=bucket_name, Prefix=prefix)
+            
+            matching_keys = []
+            for page in page_iterator:
+                if 'Contents' in page:
+                    for obj in page['Contents']:
+                        obj_key = obj['Key']
+                        if fnmatch.fnmatch(obj_key, key):
+                            matching_keys.append(obj_key)
+            
+            if matching_keys:
+                expanded_keys.extend(matching_keys)
+                print(f"  Found {len(matching_keys)} matching objects")
+            else:
+                print(f"  No objects found matching pattern: {key}")
+        else:
+            # No glob pattern, use as-is
+            expanded_keys.append(key)
+    
+    return expanded_keys
 
 def download_files_to_zip(output_zip_name, profile_name, region, bucket_name, *object_keys):
     # Initialize a session using AWS profile
     session = boto3.Session(profile_name=profile_name, region_name=region)
     s3 = session.client('s3')
     
-    # The BytesIO object will serve as a buffer for the ZIP file
-    zip_buffer = BytesIO()
+    # Expand any glob patterns in the object keys
+    expanded_keys = expand_glob_patterns(s3, bucket_name, object_keys)
     
-    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-        for object_key in object_keys:
+    # If we expanded any patterns, show confirmation
+    if len(expanded_keys) != len(object_keys):
+        print(f"\nExpanded {len(object_keys)} input patterns to {len(expanded_keys)} objects:")
+        for key in expanded_keys:
+            print(f"  {key}")
+        
+        response = input(f"\nDownload {len(expanded_keys)} objects? (y/N): ")
+        if response.lower() != 'y':
+            print("Download cancelled.")
+            return
+    
+    # Create ZIP file directly on disk, not in memory
+    with zipfile.ZipFile(output_zip_name, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+        for i, object_key in enumerate(expanded_keys, 1):
             # Retrieve the object from S3
-            print(f"Downloading {object_key} from {bucket_name}")
-            s3_response = s3.get_object(Bucket=bucket_name, Key=object_key)
-            file_contents = s3_response['Body'].read()
+            print(f"Downloading {object_key} from {bucket_name} ({i}/{len(expanded_keys)})")
             
-            # Add the file to the zip
-            zip_file.writestr(object_key, file_contents)
+            # Stream the file directly to the ZIP without loading into memory
+            s3_response = s3.get_object(Bucket=bucket_name, Key=object_key)
+            
+            # Use writestr with the streaming response body
+            zip_file.writestr(object_key, s3_response['Body'].read())
+            
+            # Force write to disk periodically to avoid memory buildup
+            if i % 100 == 0:
+                zip_file.fp.flush()
+                print(f"  Progress: {i}/{len(expanded_keys)} files processed")
     
-    # Move the pointer to the beginning of the BytesIO buffer
-    zip_buffer.seek(0)
-    
-    # Write the ZIP file to disk
-    with open(output_zip_name, 'wb') as f:
-        f.write(zip_buffer.getvalue())
+    print(f"\nZIP file created: {output_zip_name}")
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
@@ -46,17 +97,19 @@ Key use cases:
 - Backup operations: Package multiple files for backup or transfer
 - Distribution: Bundle files for sharing or deployment
 - Data processing: Prepare file collections for analysis or processing
+- Pattern matching: Use glob patterns (* and ?) to download multiple files matching a pattern
 
 The tool downloads each specified S3 object and adds it to a ZIP file with the original key 
-structure preserved. It provides progress feedback during downloads and creates a single 
-compressed output file containing all requested objects.''',
+structure preserved. It supports glob patterns for bulk operations and provides progress feedback 
+during downloads. When glob patterns are used, it will show a confirmation prompt before downloading 
+the expanded list of objects.''',
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument('output_zip_name', help='Output ZIP file name')
     parser.add_argument('profile_name', help='AWS profile name')
     parser.add_argument('region', help='AWS region')
     parser.add_argument('bucket_name', help='S3 bucket name')
-    parser.add_argument('object_keys', nargs='+', help='S3 object keys to download')
+    parser.add_argument('object_keys', nargs='+', help='S3 object keys to download (supports glob patterns with * and ?)')
     args = parser.parse_args()
     
     output_zip_name = args.output_zip_name
