@@ -1,0 +1,23 @@
+#!/usr/bin/perl -w
+
+# get all these files in a list: gmod | egrep 'rb$'
+@files = split('\n', `gmod | egrep 'rb\$'`);
+
+# Run this escaped: bundle exec rubocop -A @files
+system('bundle', 'exec', 'rubocop', '-A', 
+@files);
+
+system('git', 'commit', @ARGV);
+
+#set str = ''
+#set i = 1
+#while ($i <= $#)
+#    echo $i
+#    echo $argv[$i]
+#    echo "WIG"
+#    set str = "$str"' '`echo "${argv[$i]}" | perl -pe 's/([ \\])/\\$1/g'`''
+#    echo "BAR: "$str
+#    @ i = $i + 1
+#end
+#
+#perl -e 'use Dave::Bug qw(:common);  bug(\@ARGV);' $str
