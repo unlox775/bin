@@ -1,0 +1,83 @@
+#!/bin/bash
+
+# Count files in directories at a specified depth level
+# Usage: count_files [depth] [-a|--all]
+#   depth: directory depth level (default: 0 means immediate subdirectories)
+#   -a, --all: show all directories instead of just top 20
+
+# Default values
+depth=1
+show_all=false
+
+# Parse arguments
+for arg in "$@"; do
+    case $arg in
+        -a|--all)
+            show_all=true
+            shift
+            ;;
+        -h|--help)
+            echo "Usage: count_files [depth] [-a|--all]"
+            echo "  depth: directory depth level (default: 0 = immediate subdirs)"
+            echo "  -a, --all: show all directories instead of just top 20"
+            exit 0
+            ;;
+        -*)
+            echo "Unknown option: $arg"
+            exit 1
+            ;;
+        *)
+            if [[ "$arg" =~ ^[0-9]+$ ]]; then
+                depth=$((arg + 1))  # +1 because we want to count AT that level
+            fi
+            ;;
+    esac
+done
+
+# Get current directory
+base_dir="${1:-.}"
+
+# Create a temporary file to store results
+tmpfile=$(mktemp)
+trap 'rm -f "$tmpfile"' EXIT
+
+echo "Counting files at depth level $((depth - 1))..."
+
+# Find all directories at the specified depth and count files within each
+find . -mindepth "$depth" -maxdepth "$depth" -type d | while read -r dir; do
+    # Count all files recursively within this directory
+    count=$(find "$dir" -type f 2>/dev/null | wc -l | tr -d ' ')
+    echo "$count|$dir"
+done > "$tmpfile"
+
+# Calculate total files
+total=$(awk -F'|' '{sum+=$1} END {print sum}' "$tmpfile")
+
+if [ "$total" -eq 0 ]; then
+    echo "No files found at depth $((depth - 1))"
+    exit 0
+fi
+
+echo ""
+echo "Total files: $total"
+echo ""
+printf "%-10s %-8s %s\n" "FILES" "PERCENT" "DIRECTORY"
+printf "%-10s %-8s %s\n" "----------" "--------" "------------------------------"
+
+# Sort by file count (descending) and display with percentages
+sort -t'|' -k1 -rn "$tmpfile" | while IFS='|' read -r count dir; do
+    if [ "$count" -gt 0 ]; then
+        percent=$(awk -v c="$count" -v t="$total" 'BEGIN {printf "%.1f%%", (c/t)*100}')
+        printf "%-10s %-8s %s\n" "$count" "$percent" "$dir"
+    fi
+done | if [ "$show_all" = false ]; then head -20; else cat; fi
+
+# Show summary if limited
+if [ "$show_all" = false ]; then
+    total_dirs=$(wc -l < "$tmpfile" | tr -d ' ')
+    if [ "$total_dirs" -gt 20 ]; then
+        echo ""
+        echo "Showing top 20 of $total_dirs directories. Use -a or --all to see all."
+    fi
+fi
+
