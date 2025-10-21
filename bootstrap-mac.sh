@@ -29,12 +29,14 @@ ensure_homebrew() {
 
 brew_install_if_missing() {
   local pkg="$1"
-  if ! brew list --formula --cask --versions "$pkg" >/dev/null 2>&1; then
-    if brew info --cask "$pkg" >/dev/null 2>&1; then
-      brew install --cask "$pkg"
-    else
-      brew install "$pkg"
-    fi
+  if brew list --formula --versions "$pkg" >/dev/null 2>&1 || \
+     brew list --cask --versions "$pkg" >/dev/null 2>&1; then
+    return 0
+  fi
+  if brew info --cask "$pkg" >/dev/null 2>&1; then
+    brew install --cask "$pkg"
+  else
+    brew install "$pkg"
   fi
 }
 
