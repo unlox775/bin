@@ -24,7 +24,12 @@ def check_aws_access():
 
 def get_redshift_clusters(search_term):
     """Find Redshift clusters matching the search term"""
-    redshift = boto3.client('redshift')
+    # Get region from environment or AWS config
+    region_name = os.environ.get('AWS_REGION') or os.environ.get('AWS_DEFAULT_REGION')
+    if region_name:
+        redshift = boto3.client('redshift', region_name=region_name)
+    else:
+        redshift = boto3.client('redshift')
     response = redshift.describe_clusters()
     search_term_lower = search_term.lower()
     result = []

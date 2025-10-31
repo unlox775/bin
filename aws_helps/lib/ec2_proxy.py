@@ -12,8 +12,24 @@ class EC2Proxy:
     """EC2 instance proxy for SSM port forwarding and tunneling"""
     
     def __init__(self):
-        self.ssm = boto3.client('ssm')
-        self.ec2 = boto3.client('ec2')
+        # Get region from environment or AWS config, with fallback
+        region_name = os.environ.get('AWS_REGION') or os.environ.get('AWS_DEFAULT_REGION')
+        if region_name:
+            self.ssm = boto3.client('ssm', region_name=region_name)
+            self.ec2 = boto3.client('ec2', region_name=region_name)
+        else:
+            # Fallback: try to get region from default session
+            try:
+                session = boto3.Session()
+                region_name = session.region_name
+                if region_name:
+                    self.ssm = boto3.client('ssm', region_name=region_name)
+                    self.ec2 = boto3.client('ec2', region_name=region_name)
+                else:
+                    raise ValueError("No AWS region configured")
+            except Exception:
+                self.ssm = boto3.client('ssm')
+                self.ec2 = boto3.client('ec2')
     
     def get_default_ec2_instance(self):
         """Get default EC2 instance from environment variables"""
@@ -325,10 +341,7 @@ class EC2Proxy:
         if not aws_common.check_aws_credentials():
             return False
         
-        # Now check SSM access
-        ssm = boto3.client('ssm')
-        ec2 = boto3.client('ec2')
-        
+        # Now check SSM access - use instance clients which are already initialized with region
         print("Checking SSM session permissions...")
         
         # Check if we have a default EC2 instance from environment variable
@@ -358,7 +371,7 @@ class EC2Proxy:
         else:
             # Find any running instance ID to test against
             try:
-                ec2_response = ec2.describe_instances(
+                ec2_response = self.ec2.describe_instances(
                     Filters=[{'Name': 'instance-state-name', 'Values': ['running']}],
                     MaxResults=50
                 )
