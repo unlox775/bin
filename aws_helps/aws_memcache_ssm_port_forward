@@ -23,7 +23,8 @@ def check_aws_access():
     return ec2_proxy.check_aws_ssm_access()
 
 def get_memcache_clusters(search_term):
-    elasticache = boto3.client('elasticache')
+    # Use AWSCommon for centralized region handling
+    elasticache = aws_common.get_boto3_client('elasticache')
     response = elasticache.describe_cache_clusters(ShowCacheNodeInfo=True)
     search_term_lower = search_term.lower()
     result = []

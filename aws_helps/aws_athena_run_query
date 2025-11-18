@@ -38,8 +38,11 @@ def wait_for_query_to_complete(client, query_execution_id):
             return response['QueryExecution']['ResultConfiguration']['OutputLocation']
         time.sleep(5)
 
-def download_and_print_results(s3_path):
-    s3 = boto3.client('s3')
+def download_and_print_results(s3_path, region=None):
+    # Use AWSCommon for centralized region handling
+    from lib.aws_common import AWSCommon
+    aws_common = AWSCommon()
+    s3 = aws_common.get_boto3_client('s3', region_name=region)
     bucket, key = s3_path.replace("s3://", "").split("/", 1)
     obj = s3.get_object(Bucket=bucket, Key=key)
     lines = obj['Body'].read().decode('utf-8').splitlines()
@@ -94,7 +97,7 @@ SIGINT and reads S3 output location from the AWS_ATHENA_RESULTS_BUCKET environme
         result_location = wait_for_query_to_complete(client, query_execution_id)
 
         # Download results and print to STDOUT
-        download_and_print_results(result_location)
+        download_and_print_results(result_location, region=region)
 
     except ClientError as e:
         print(f"An error occurred: {e}", file=sys.stderr)

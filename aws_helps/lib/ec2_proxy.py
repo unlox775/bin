@@ -7,29 +7,16 @@ import subprocess
 import boto3
 import botocore.exceptions
 import inquirer
+from .aws_common import AWSCommon
 
 class EC2Proxy:
     """EC2 instance proxy for SSM port forwarding and tunneling"""
     
     def __init__(self):
-        # Get region from environment or AWS config, with fallback
-        region_name = os.environ.get('AWS_REGION') or os.environ.get('AWS_DEFAULT_REGION')
-        if region_name:
-            self.ssm = boto3.client('ssm', region_name=region_name)
-            self.ec2 = boto3.client('ec2', region_name=region_name)
-        else:
-            # Fallback: try to get region from default session
-            try:
-                session = boto3.Session()
-                region_name = session.region_name
-                if region_name:
-                    self.ssm = boto3.client('ssm', region_name=region_name)
-                    self.ec2 = boto3.client('ec2', region_name=region_name)
-                else:
-                    raise ValueError("No AWS region configured")
-            except Exception:
-                self.ssm = boto3.client('ssm')
-                self.ec2 = boto3.client('ec2')
+        # Use AWSCommon for centralized region handling
+        aws_common = AWSCommon()
+        self.ssm = aws_common.get_boto3_client('ssm')
+        self.ec2 = aws_common.get_boto3_client('ec2')
     
     def get_default_ec2_instance(self):
         """Get default EC2 instance from environment variables"""

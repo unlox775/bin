@@ -23,7 +23,8 @@ def check_aws_access():
 
 def get_rds_instances(search_term):
     """Find RDS MySQL instances matching the search term"""
-    rds = boto3.client('rds')
+    # Use AWSCommon for centralized region handling
+    rds = aws_common.get_boto3_client('rds')
     
     # List all RDS instances
     response = rds.describe_db_instances()

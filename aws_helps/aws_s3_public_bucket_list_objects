@@ -4,11 +4,17 @@ import boto3
 from botocore import UNSIGNED
 from botocore.config import Config
 import sys
+import os
 import argparse
 
+# Import AWSCommon for centralized region handling
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from lib.aws_common import AWSCommon
+
 def list_bucket_objects(bucket_name):
-    # Create a Boto3 client for S3 with unsigned configuration
-    s3_client = boto3.client('s3', config=Config(signature_version=UNSIGNED))
+    # Use AWSCommon for centralized region handling, with unsigned config for public buckets
+    aws_common = AWSCommon()
+    s3_client = aws_common.get_boto3_client('s3', config=Config(signature_version=UNSIGNED))
     
     try:
         # List objects within the specified bucket

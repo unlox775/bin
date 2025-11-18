@@ -3,13 +3,19 @@
 import boto3
 from botocore.config import Config
 import sys
+import os
 import random
 import string
 import argparse
 
+# Import AWSCommon for centralized region handling
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from lib.aws_common import AWSCommon
+
 def put_object_to_bucket(bucket_name, object_name):
-    # Create a Boto3 client for S3 with unsigned configuration
-    s3_client = boto3.client(
+    # Use AWSCommon for centralized region handling, with special config for public buckets
+    aws_common = AWSCommon()
+    s3_client = aws_common.get_boto3_client(
         's3',
         config=Config(signature_version='s3v4', s3={'addressing_style': 'path'})
     )
