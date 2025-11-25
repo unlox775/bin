@@ -158,6 +158,50 @@ def select_instance(instances, search_term):
             sys.exit(0)
         return answers['selected_instance']
     except KeyboardInterrupt:
+        print("\nOperation cancelled. Exiting.")
+        sys.exit(0)
+
+def connect_to_instance(instance_id):
+    """Connect to the selected EC2 instance via SSM"""
+    print("Starting session with command: aws ssm start-session --target " + instance_id)
+    os.execvp('aws', ['aws', 'ssm', 'start-session', '--target', instance_id])
+
+def main():
+    parser = argparse.ArgumentParser(
+        description='''Interactive EC2 instance connection tool using AWS Systems Manager.
+
+This tool provides an interactive way to connect to EC2 instances using AWS Systems Manager (SSM) 
+sessions. It searches for running instances by ID, name, or tags and presents an interactive 
+menu for selection, then establishes an SSM session connection.
+
+Key use cases:
+- Interactive server access: Quickly find and connect to EC2 instances
+- Tag-based discovery: Search instances by environment, role, or other tags
+- Secure access: Use SSM sessions instead of SSH keys or bastion hosts
+- Troubleshooting: Connect to instances for debugging or maintenance
+- Multi-account management: Work across different AWS accounts and regions
+
+The tool validates AWS credentials and SSM permissions before attempting connections, provides 
+helpful error messages for permission issues, and supports searching by instance ID, name, 
+or any tag value. It automatically handles AWS profile selection and credential validation.''',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument('search_term', help='Search term to match instance ID, name, or tags')
+    args = parser.parse_args()
+
+    # Check AWS access and SSM permissions before proceeding
+    check_aws_access()
+    
+    # Get search term from first CLI arg
+    search_term = args.search_term
+    
+    instances = get_instances(search_term)
+
+    if not instances:
+        print("No instances found matching the search term.")
+        return
+
+    selected_instance = select_instance(instances, search_term)
 
     instance_id = selected_instance.split(' - ')[0]
     connect_to_instance(instance_id)
