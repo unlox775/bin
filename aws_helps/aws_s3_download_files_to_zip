@@ -2,86 +2,184 @@
 
 import sys
 import boto3
+import botocore.exceptions
 from io import BytesIO
 import zipfile
 import os
 import argparse
-import fnmatch
+from datetime import datetime
 
-def expand_glob_patterns(s3, bucket_name, object_keys):
-    """Expand glob patterns in object keys to actual S3 object keys"""
-    expanded_keys = []
-    
-    for key in object_keys:
-        if '*' in key or '?' in key:
-            # This is a glob pattern, need to expand it
-            print(f"Expanding glob pattern: {key}")
-            
-            # Extract prefix for more efficient listing
-            prefix = key.split('*')[0].split('?')[0]
-            if not prefix:
-                prefix = ""
-            
-            # List objects with the prefix
-            paginator = s3.get_paginator('list_objects_v2')
-            page_iterator = paginator.paginate(Bucket=bucket_name, Prefix=prefix)
-            
-            matching_keys = []
-            for page in page_iterator:
-                if 'Contents' in page:
-                    for obj in page['Contents']:
-                        obj_key = obj['Key']
-                        if fnmatch.fnmatch(obj_key, key):
-                            matching_keys.append(obj_key)
-            
-            if matching_keys:
-                expanded_keys.extend(matching_keys)
-                print(f"  Found {len(matching_keys)} matching objects")
-            else:
-                print(f"  No objects found matching pattern: {key}")
-        else:
-            # No glob pattern, use as-is
-            expanded_keys.append(key)
-    
-    return expanded_keys
+# Import shared S3 utilities
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from lib.s3_common import (
+    parse_time_range,
+    parse_newer_than_date,
+    filter_objects_by_time,
+    generate_zip_name,
+    expand_glob_patterns,
+    parse_size
+)
 
-def download_files_to_zip(output_zip_name, profile_name, region, bucket_name, *object_keys):
-    # Initialize a session using AWS profile
-    session = boto3.Session(profile_name=profile_name, region_name=region)
-    s3 = session.client('s3')
-    
-    # Expand any glob patterns in the object keys
-    expanded_keys = expand_glob_patterns(s3, bucket_name, object_keys)
-    
-    # If we expanded any patterns, show confirmation
-    if len(expanded_keys) != len(object_keys):
-        print(f"\nExpanded {len(object_keys)} input patterns to {len(expanded_keys)} objects:")
-        for key in expanded_keys:
-            print(f"  {key}")
+
+def download_files_to_zip(output_zip_name, profile_name, region, bucket_name, object_keys, time_range=None, newer_than=None, max_zip_size=None, require_confirm=False):
+    zip_file = None
+    session = None
+    s3 = None
+    try:
+        # Initialize a session using AWS profile
+        session = boto3.Session(profile_name=profile_name, region_name=region)
+        s3 = session.client('s3')
         
-        response = input(f"\nDownload {len(expanded_keys)} objects? (y/N): ")
-        if response.lower() != 'y':
-            print("Download cancelled.")
+        # Auto-generate zip name if output_zip_name is "%"
+        if output_zip_name == '%':
+            output_zip_name = generate_zip_name(bucket_name, object_keys, time_range, newer_than)
+            print(f"Auto-generated ZIP filename: {output_zip_name}")
+        
+        # Expand any glob patterns in the object keys and apply time filtering
+        # Use case-insensitive matching for file extensions (.png, .jpg, .jpeg, etc.)
+        expanded_objects = expand_glob_patterns(s3, bucket_name, object_keys, time_range, newer_than, verbose=True, case_insensitive=True)
+        # Extract just the keys for downloading
+        expanded_keys = [obj['Key'] for obj in expanded_objects]
+        
+        if not expanded_keys:
+            print("No objects found matching the criteria.")
             return
-    
-    # Create ZIP file directly on disk, not in memory
-    with zipfile.ZipFile(output_zip_name, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-        for i, object_key in enumerate(expanded_keys, 1):
-            # Retrieve the object from S3
-            print(f"Downloading {object_key} from {bucket_name} ({i}/{len(expanded_keys)})")
-            
+        
+        # Show summary (but only prompt for confirmation if --confirm flag was set)
+        if len(expanded_keys) != len(object_keys) or time_range or newer_than:
+            print(f"\n{'Expanded' if len(expanded_keys) != len(object_keys) else 'Found'} {len(object_keys)} input pattern(s) to {len(expanded_keys)} objects:")
+            # Show first 10, then summarize if more
+            for i, key in enumerate(expanded_keys[:10]):
+                print(f"  {key}")
+            if len(expanded_keys) > 10:
+                print(f"  ... and {len(expanded_keys) - 10} more")
+        
+        # Only prompt for confirmation if --confirm flag was set
+        if require_confirm:
+            response = input(f"\nDownload {len(expanded_keys)} objects? (y/N): ")
+            if response.lower() != 'y':
+                print("Download cancelled.")
+                return
+        else:
+            print(f"\nProceeding to download {len(expanded_keys)} objects...")
+        
+        # Create ZIP file directly on disk, not in memory
+        zip_file = zipfile.ZipFile(output_zip_name, 'w', zipfile.ZIP_DEFLATED)
+        truncated = False
+        try:
+            for i, object_key in enumerate(expanded_keys, 1):
+                # Check current zip file size before adding next file
+                if max_zip_size:
+                    if os.path.exists(output_zip_name):
+                        current_size = os.path.getsize(output_zip_name)
+                        if current_size >= max_zip_size:
+                            print(f"\nMaximum ZIP size ({max_zip_size:,} bytes) reached. Stopping download.")
+                            truncated = True
+                            break
+                
+                # Retrieve the object from S3
+                print(f"Downloading {object_key} from {bucket_name} ({i}/{len(expanded_keys)})")
+                
             # Stream the file directly to the ZIP without loading into memory
-            s3_response = s3.get_object(Bucket=bucket_name, Key=object_key)
+            # Handle potential SSO token expiration with retry
+            max_retries = 3
+            retry_count = 0
+            while retry_count < max_retries:
+                try:
+                    s3_response = s3.get_object(Bucket=bucket_name, Key=object_key)
+                    break
+                except botocore.exceptions.ClientError as e:
+                    error_code = e.response.get('Error', {}).get('Code', '')
+                    error_msg = str(e)
+                    
+                    # Check for token expiration or authentication errors
+                    if error_code in ['ExpiredToken', 'InvalidToken', 'TokenRefreshRequired'] or \
+                       'expired' in error_msg.lower() or 'token' in error_msg.lower() or \
+                       'authentication' in error_msg.lower():
+                        if retry_count < max_retries - 1:
+                            print(f"\n  Warning: Authentication token may have expired. Attempting to refresh...")
+                            print(f"  If this persists, you may need to run: aws sso login --profile {profile_name}")
+                            # Recreate the session to trigger token refresh
+                            session = boto3.Session(profile_name=profile_name, region_name=region)
+                            s3 = session.client('s3')
+                            retry_count += 1
+                            continue
+                        else:
+                            print(f"\n  Error: Authentication failed after {max_retries} attempts.")
+                            print(f"  Your SSO token may have expired during the long-running operation.")
+                            print(f"  Please refresh your token and try again:")
+                            print(f"    aws sso login --profile {profile_name}")
+                            raise
+                    else:
+                        # Not an auth error, re-raise
+                        raise
+                file_data = s3_response['Body'].read()
+                
+                # Write the file to the ZIP
+                zip_file.writestr(object_key, file_data)
+                
+                # Check if we've exceeded the limit after adding this file
+                if max_zip_size:
+                    zip_file.fp.flush()  # Flush to ensure size is updated on disk
+                    current_size = os.path.getsize(output_zip_name)
+                    if current_size >= max_zip_size:
+                        print(f"\nMaximum ZIP size ({max_zip_size:,} bytes) reached after adding {object_key}.")
+                        print(f"  Current ZIP size: {current_size:,} bytes")
+                        truncated = True
+                        break
+                
+                # Force write to disk periodically to avoid memory buildup
+                if i % 100 == 0:
+                    zip_file.fp.flush()
+                    if max_zip_size:
+                        current_size = os.path.getsize(output_zip_name)
+                        print(f"  Progress: {i}/{len(expanded_keys)} files processed, ZIP size: {current_size:,} bytes")
+                    else:
+                        print(f"  Progress: {i}/{len(expanded_keys)} files processed")
             
-            # Use writestr with the streaming response body
-            zip_file.writestr(object_key, s3_response['Body'].read())
+            # Final flush and close
+            zip_file.fp.flush()
+            zip_file.close()
+            zip_file = None
             
-            # Force write to disk periodically to avoid memory buildup
-            if i % 100 == 0:
+            # Rename file if truncated
+            if truncated:
+                # Insert "-truncated" before the .zip extension
+                base_name, ext = os.path.splitext(output_zip_name)
+                truncated_name = f"{base_name}-truncated{ext}"
+                os.rename(output_zip_name, truncated_name)
+                print(f"\nZIP file created (truncated): {truncated_name}")
+                print(f"  Note: Download stopped at maximum size limit. {i-1} files were included.")
+            else:
+                print(f"\nZIP file created: {output_zip_name}")
+            
+        except KeyboardInterrupt:
+            print(f"\n\nInterrupted during download. Cleaning up...")
+            if zip_file:
                 zip_file.fp.flush()
-                print(f"  Progress: {i}/{len(expanded_keys)} files processed")
-    
-    print(f"\nZIP file created: {output_zip_name}")
+                zip_file.close()
+                # Try to finalize the zip file properly
+                print(f"ZIP file partially written: {output_zip_name}")
+                print("  Note: The ZIP file may be incomplete but should be readable for files already written.")
+            raise
+            
+    except KeyboardInterrupt:
+        print(f"\n\nOperation cancelled by user (Ctrl+C)")
+        if zip_file:
+            try:
+                zip_file.fp.flush()
+                zip_file.close()
+                print(f"ZIP file partially written: {output_zip_name}")
+            except:
+                pass
+        sys.exit(130)  # Standard exit code for SIGINT
+    except Exception as e:
+        if zip_file:
+            try:
+                zip_file.close()
+            except:
+                pass
+        raise
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
@@ -98,18 +196,34 @@ Key use cases:
 - Distribution: Bundle files for sharing or deployment
 - Data processing: Prepare file collections for analysis or processing
 - Pattern matching: Use glob patterns (* and ?) to download multiple files matching a pattern
+- Time-based filtering: Filter objects by modification time using --time-range and --newer-than
 
 The tool downloads each specified S3 object and adds it to a ZIP file with the original key 
 structure preserved. It supports glob patterns for bulk operations and provides progress feedback 
 during downloads. When glob patterns are used, it will show a confirmation prompt before downloading 
-the expanded list of objects.''',
+the expanded list of objects.
+
+Time filtering:
+- Use --time-range to filter objects within a time range (e.g., "5 hours", "3 days", "2.5 days")
+- Use --newer-than to specify a start date/time (YYYY-MM-DD or YYYY-MM-DD-HH-MM-SS)
+- If only --time-range is specified, it uses the most recent time range
+- If both are specified, --newer-than is the start and --time-range is the duration from that start
+- Use "%" as output_zip_name to auto-generate a descriptive filename based on bucket, keys, and time filters''',
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument('output_zip_name', help='Output ZIP file name')
+    parser.add_argument('output_zip_name', help='Output ZIP file name (use %% for auto-generated name)')
     parser.add_argument('profile_name', help='AWS profile name')
     parser.add_argument('region', help='AWS region')
     parser.add_argument('bucket_name', help='S3 bucket name')
     parser.add_argument('object_keys', nargs='+', help='S3 object keys to download (supports glob patterns with * and ?)')
+    parser.add_argument('--time-range', dest='time_range', metavar='RANGE',
+                        help='Time range filter (e.g., "5 hours", "3 days", "2.5 days", "3 months"). Uses most recent time range if --newer-than not specified.')
+    parser.add_argument('--newer-than', dest='newer_than', metavar='DATE',
+                        help='Start date/time filter (YYYY-MM-DD or YYYY-MM-DD-HH-MM-SS, optionally with timezone). If --time-range is also specified, applies range from this date.')
+    parser.add_argument('--max-zip-size', dest='max_zip_size', metavar='SIZE',
+                        help='Maximum ZIP file size (e.g., "2GB", "5MB", "25K", "35TB"). When reached, the ZIP file will be closed and renamed with "-truncated" suffix.')
+    parser.add_argument('--confirm', dest='require_confirm', action='store_true',
+                        help='Require confirmation before downloading (default: proceed without confirmation)')
     args = parser.parse_args()
     
     output_zip_name = args.output_zip_name
@@ -117,9 +231,70 @@ the expanded list of objects.''',
     region = args.region
     bucket_name = args.bucket_name
     object_keys = args.object_keys
+    
+    # Parse time filters
+    time_range = None
+    newer_than = None
+    
+    # Parse max zip size
+    max_zip_size = None
+    if args.max_zip_size:
+        try:
+            max_zip_size = parse_size(args.max_zip_size)
+            print(f"Maximum ZIP size: {args.max_zip_size} ({max_zip_size:,} bytes)")
+        except ValueError as e:
+            print(f"Error parsing max zip size: {e}", file=sys.stderr)
+            sys.exit(1)
+    
+    # Parse time_range first
+    if args.time_range:
+        try:
+            time_range = parse_time_range(args.time_range)
+        except ValueError as e:
+            print(f"Error parsing time range: {e}", file=sys.stderr)
+            sys.exit(1)
+    
+    # Parse newer_than
+    if args.newer_than:
+        try:
+            newer_than = parse_newer_than_date(args.newer_than)
+        except ValueError as e:
+            print(f"Error parsing newer-than date: {e}", file=sys.stderr)
+            sys.exit(1)
+    
+    # Now display the time range information in local time
+    from dateutil import tz as dateutil_tz
+    
+    if time_range:
+        # Calculate and display the actual time range in local time
+        if newer_than:
+            # If newer_than is provided, use it as start
+            start_dt = newer_than
+            if start_dt.tzinfo is None:
+                # Assume local time if no timezone
+                start_dt = start_dt.replace(tzinfo=dateutil_tz.tzlocal())
+            else:
+                # Convert to local time
+                start_dt = start_dt.astimezone(dateutil_tz.tzlocal())
+            end_dt = start_dt + time_range
+        else:
+            # Use most recent time range
+            end_dt = datetime.now(dateutil_tz.tzlocal())
+            start_dt = end_dt - time_range
+        
+        print(f"Time range: {args.time_range}")
+        print(f"  Filtering objects from {start_dt.isoformat()} to {end_dt.isoformat()} (local time)")
+    
+    if newer_than:
+        # Display in local time
+        if newer_than.tzinfo is None:
+            newer_than_local = newer_than.replace(tzinfo=dateutil_tz.tzlocal())
+        else:
+            newer_than_local = newer_than.astimezone(dateutil_tz.tzlocal())
+        print(f"Newer than: {args.newer_than} -> {newer_than_local.isoformat()} (local time)")
 
     # Set AWS profile and region environment variables
     os.environ['AWS_PROFILE'] = profile_name
     os.environ['AWS_DEFAULT_REGION'] = region
     
-    download_files_to_zip(output_zip_name, profile_name, region, bucket_name, *object_keys)
+    download_files_to_zip(output_zip_name, profile_name, region, bucket_name, object_keys, time_range, newer_than, max_zip_size, args.require_confirm)

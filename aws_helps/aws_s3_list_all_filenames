@@ -5,22 +5,44 @@ import sys
 import os
 import argparse
 from urllib.parse import urlparse
+from datetime import datetime
 
 # Import AWSCommon for centralized region handling
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from lib.aws_common import AWSCommon
+from lib.s3_common import (
+    parse_time_range,
+    parse_newer_than_date,
+    expand_glob_patterns
+)
 
-def list_files(bucket_name, prefix):
+def list_files(bucket_name, object_keys, time_range=None, newer_than=None, case_insensitive=False):
+    """
+    List files in S3 bucket matching the given patterns.
+    
+    Args:
+        bucket_name: S3 bucket name
+        object_keys: List of object key patterns (may contain glob patterns)
+        time_range: Optional timedelta for time range filter
+        newer_than: Optional datetime for start time filter
+        case_insensitive: If True, pattern matching is case-insensitive
+    """
     # Use AWSCommon for centralized region handling
     aws_common = AWSCommon()
     s3 = aws_common.get_boto3_client('s3')
-    paginator = s3.get_paginator('list_objects_v2')
-
-    page_iterator = paginator.paginate(Bucket=bucket_name, Prefix=prefix)
-
-    for page in page_iterator:
-        for obj in page.get('Contents', []):  # Safeguard for empty contents
-            print(obj['Key'])
+    
+    # Use expand_glob_patterns to handle glob patterns and time filtering
+    expanded_objects = expand_glob_patterns(
+        s3, bucket_name, object_keys, 
+        time_range=time_range, 
+        newer_than=newer_than,
+        verbose=True,
+        case_insensitive=case_insensitive
+    )
+    
+    # Output just the keys (one per line)
+    for obj in expanded_objects:
+        print(obj['Key'])
 
 def parse_s3_url(s3_url):
     parsed_url = urlparse(s3_url)
@@ -34,37 +56,132 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='''S3 bucket file enumeration and listing tool.
 
-This tool lists all files in an S3 bucket or prefix, providing a complete inventory 
-of objects stored in S3. It supports pagination to handle large buckets and can 
-filter by prefix to focus on specific directories or file patterns.
+This tool lists all files in an S3 bucket matching specified patterns, providing a complete 
+inventory of objects stored in S3. It supports glob patterns (including ** for recursive 
+matching), time-based filtering, and pagination to handle large buckets.
 
 Key use cases:
 - File inventory: Get complete lists of files in S3 buckets
+- Pattern matching: Find files matching glob patterns (e.g., **/*.png, assets/**/*.jpg)
+- Time-based filtering: List files modified within a specific time range
 - Backup verification: Verify file presence and structure
 - Data analysis: Understand file distribution and patterns
 - Cleanup operations: Identify files for deletion or archival
 - Migration planning: Document file structures for data migration
 
-The tool uses S3's pagination API to efficiently handle buckets with millions of 
-objects and provides simple, clean output suitable for further processing or analysis. 
-It supports S3 URL format for easy specification of bucket and prefix combinations.''',
+The tool uses S3's pagination API to efficiently handle buckets with millions of objects 
+and provides simple, clean output suitable for further processing or analysis. It supports 
+both S3 URL format and explicit bucket/pattern specification.
+
+Pattern matching:
+- Supports glob patterns: * (matches any characters), ? (matches single character), ** (recursive)
+- Example: "assets/**/*.png" matches all .png files at any depth under assets/
+- Use --case-insensitive for case-insensitive matching
+
+Time filtering:
+- Use --time-range to filter objects within a time range (e.g., "5 hours", "3 days", "2.5 days")
+- Use --newer-than to specify a start date/time (YYYY-MM-DD or YYYY-MM-DD-HH-MM-SS)
+- If only --time-range is specified, it uses the most recent time range
+- If both are specified, --newer-than is the start and --time-range is the duration from that start''',
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument('profile_name', help='AWS profile name')
     parser.add_argument('region', help='AWS region')
-    parser.add_argument('s3_url', help='S3 URL (e.g., s3://bucket-name/prefix/)')
+    parser.add_argument('s3_url', nargs='?', help='S3 URL (e.g., s3://bucket-name/prefix/) or bucket name')
+    parser.add_argument('--bucket', dest='bucket_name', metavar='BUCKET',
+                        help='S3 bucket name (alternative to S3 URL)')
+    parser.add_argument('--pattern', dest='patterns', action='append', metavar='PATTERN',
+                        help='Object key pattern (supports glob patterns with *, ?, **). Can be specified multiple times.')
+    parser.add_argument('--time-range', dest='time_range', metavar='RANGE',
+                        help='Time range filter (e.g., "5 hours", "3 days", "2.5 days", "3 months"). Uses most recent time range if --newer-than not specified.')
+    parser.add_argument('--newer-than', dest='newer_than', metavar='DATE',
+                        help='Start date/time filter (YYYY-MM-DD or YYYY-MM-DD-HH-MM-SS, optionally with timezone). If --time-range is also specified, applies range from this date.')
+    parser.add_argument('--case-insensitive', dest='case_insensitive', action='store_true',
+                        help='Make pattern matching case-insensitive')
     args = parser.parse_args()
-
+    
     profile_name = args.profile_name
     region = args.region
-    s3_url = args.s3_url
 
     # Set AWS profile and region environment variables
     os.environ['AWS_PROFILE'] = profile_name
     os.environ['AWS_DEFAULT_REGION'] = region
 
-    # Parse the S3 URL to get the bucket name and prefix
-    bucket_name, prefix = parse_s3_url(s3_url)
+    # Determine bucket name and object keys
+    bucket_name = None
+    object_keys = []
+    
+    if args.bucket_name:
+        # Use explicit bucket and patterns
+        bucket_name = args.bucket_name
+        if args.patterns:
+            object_keys = args.patterns
+        else:
+            print("Error: --pattern is required when using --bucket", file=sys.stderr)
+            sys.exit(1)
+    elif args.s3_url:
+        # Parse S3 URL
+        bucket_name, prefix = parse_s3_url(args.s3_url)
+        if args.patterns:
+            # Use explicit patterns instead of prefix
+            object_keys = args.patterns
+        else:
+            # Use prefix as pattern (may contain glob patterns)
+            object_keys = [prefix] if prefix else ['']
+    else:
+        print("Error: Either S3 URL or --bucket with --pattern must be specified", file=sys.stderr)
+        sys.exit(1)
+    
+    # Parse time filters
+    time_range = None
+    newer_than = None
+    
+    # Parse time_range first
+    if args.time_range:
+        try:
+            time_range = parse_time_range(args.time_range)
+        except ValueError as e:
+            print(f"Error parsing time range: {e}", file=sys.stderr)
+            sys.exit(1)
+    
+    # Parse newer_than
+    if args.newer_than:
+        try:
+            newer_than = parse_newer_than_date(args.newer_than)
+        except ValueError as e:
+            print(f"Error parsing newer-than date: {e}", file=sys.stderr)
+            sys.exit(1)
+    
+    # Now display the time range information in local time
+    from dateutil import tz as dateutil_tz
+    
+    if time_range:
+        # Calculate and display the actual time range in local time
+        if newer_than:
+            # If newer_than is provided, use it as start
+            start_dt = newer_than
+            if start_dt.tzinfo is None:
+                # Assume local time if no timezone
+                start_dt = start_dt.replace(tzinfo=dateutil_tz.tzlocal())
+            else:
+                # Convert to local time
+                start_dt = start_dt.astimezone(dateutil_tz.tzlocal())
+            end_dt = start_dt + time_range
+        else:
+            # Use most recent time range
+            end_dt = datetime.now(dateutil_tz.tzlocal())
+            start_dt = end_dt - time_range
+        
+        print(f"Time range: {args.time_range}")
+        print(f"  Filtering objects from {start_dt.isoformat()} to {end_dt.isoformat()} (local time)")
+    
+    if newer_than:
+        # Display in local time
+        if newer_than.tzinfo is None:
+            newer_than_local = newer_than.replace(tzinfo=dateutil_tz.tzlocal())
+        else:
+            newer_than_local = newer_than.astimezone(dateutil_tz.tzlocal())
+        print(f"Newer than: {args.newer_than} -> {newer_than_local.isoformat()} (local time)")
 
-    # Call list_files with the bucket name and prefix
-    list_files(bucket_name, prefix)
+    # Call list_files with the bucket name and patterns
+    list_files(bucket_name, object_keys, time_range, newer_than, args.case_insensitive)
