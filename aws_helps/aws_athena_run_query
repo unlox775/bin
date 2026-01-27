@@ -8,13 +8,21 @@ import signal
 import argparse
 from botocore.exceptions import ClientError
 
+# Global variables to store query execution ID and client for signal handler
+query_execution_id = None
+client = None
+
 def handle_sigint(signum, frame):
-    print("Cancelling the query...", file=sys.stderr)
-    try:
-        response = client.stop_query_execution(QueryExecutionId=query_execution_id)
-        print("Query cancelled.", file=sys.stderr)
-    except ClientError as e:
-        print(f"Error cancelling query: {e}", file=sys.stderr)
+    global query_execution_id, client
+    print("\nCancelling the query...", file=sys.stderr)
+    if query_execution_id and client:
+        try:
+            response = client.stop_query_execution(QueryExecutionId=query_execution_id)
+            print("Query cancelled.", file=sys.stderr)
+        except ClientError as e:
+            print(f"Error cancelling query: {e}", file=sys.stderr)
+    else:
+        print("No active query to cancel.", file=sys.stderr)
     sys.exit(1)
 
 def run_athena_query(client, database, query, s3_output):
@@ -79,7 +87,8 @@ SIGINT and reads S3 output location from the AWS_ATHENA_RESULTS_BUCKET environme
 
     aws_profile, region, database = args.aws_profile, args.region, args.database
     session = boto3.Session(profile_name=aws_profile, region_name=region)
-    client = session.client('athena')
+    client = session.client('athena')  # Module-level global
+    query_execution_id = None  # Module-level global
 
     signal.signal(signal.SIGINT, handle_sigint)
 
@@ -92,7 +101,7 @@ SIGINT and reads S3 output location from the AWS_ATHENA_RESULTS_BUCKET environme
 
         print("Starting query...", file=sys.stderr)
         result = run_athena_query(client, database, query, s3_output)
-        query_execution_id = result['QueryExecutionId']
+        query_execution_id = result['QueryExecutionId']  # Already declared global above
 
         result_location = wait_for_query_to_complete(client, query_execution_id)
 
