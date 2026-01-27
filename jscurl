@@ -1,0 +1,196 @@
+#!/usr/bin/env python3
+"""
+jscurl - A "JS-enabled curl" using Playwright.
+Fetches a URL using a headless browser and outputs the rendered HTML.
+
+Usage:
+  jscurl <url> [-o <output_file>]
+"""
+
+import sys
+import argparse
+import os
+import shutil
+from pathlib import Path
+
+# Hard-coded UA to reduce "automation" fingerprinting.
+# (Matches what you provided; keep as a single source of truth.)
+HARD_CODED_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/143.0.0.0 Safari/537.36"
+)
+
+DEFAULT_TIMEOUT_MS = 20_000
+
+# Browser-like headers that are safe/allowed to set from Playwright.
+# (Some "sec-*" headers are restricted in real browsers; Playwright may ignore them.)
+DEFAULT_EXTRA_HEADERS = {
+    "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "accept-language": "en-US,en;q=0.8",
+    "cache-control": "max-age=0",
+    "upgrade-insecure-requests": "1",
+}
+
+# ENVIRONMENT VARIABLE OVERRIDE
+# If HOME_PYTHON_VENV is set, we MUST use it.
+ENV_VENV_PATH = os.environ.get("HOME_PYTHON_VENV")
+
+def ensure_venv():
+    """
+    Enforces the use of HOME_PYTHON_VENV if set.
+    Otherwise attempts to auto-detect common venvs.
+    """
+    current_python = Path(sys.executable).resolve()
+    target_python = None
+
+    if ENV_VENV_PATH:
+        # User explicitly requested this environment
+        venv_path = Path(ENV_VENV_PATH)
+        # Handle if they pointed to the root or the binary
+        if venv_path.name == "python3" or venv_path.name == "python":
+             target_python = venv_path.resolve()
+        else:
+             target_python = (venv_path / "bin" / "python3").resolve()
+             
+        if not target_python.exists():
+             print(f"❌ Error: HOME_PYTHON_VENV is set to '{ENV_VENV_PATH}' but python binary not found at '{target_python}'.", file=sys.stderr)
+             sys.exit(1)
+
+        if current_python != target_python:
+            # Switch to it immediately
+            try:
+                os.execv(str(target_python), [str(target_python), __file__] + sys.argv[1:])
+            except OSError as e:
+                print(f"❌ Error: Failed to switch to forced venv {target_python}: {e}", file=sys.stderr)
+                sys.exit(1)
+        return
+
+    # Fallback auto-detection (only if env var not set)
+    home = Path.home()
+    candidates = [
+        home / ".venv" / "bin" / "python3",
+        home / "venv" / "bin" / "python3",
+        home / "env" / "bin" / "python3",
+    ]
+    
+    for c in candidates:
+        if c.exists():
+            target_python = c.resolve()
+            break
+    
+    if target_python and current_python != target_python:
+        try:
+            os.execv(str(target_python), [str(target_python), __file__] + sys.argv[1:])
+        except OSError as e:
+            pass # Just warn or ignore if fallback fails
+
+def check_dependencies():
+    """Checks for required dependencies."""
+    try:
+        import playwright
+        from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+        return True, sync_playwright, PlaywrightTimeoutError
+    except ImportError:
+        print(f"❌ Error: Python dependency 'playwright' is missing in {sys.executable}.", file=sys.stderr)
+        return False, None, None
+
+def fetch_html(url: str, output_path: str = None, timeout_ms: int = DEFAULT_TIMEOUT_MS):
+    ensure_venv()
+    
+    success, sync_playwright_fn, timeout_error_cls = check_dependencies()
+    if not success:
+        sys.exit(1)
+
+    try:
+        with sync_playwright_fn() as p:
+            # Try to launch chromium
+            try:
+                browser = p.chromium.launch(
+                    headless=True,
+                    args=[
+                        "--disable-blink-features=AutomationControlled",
+                    ],
+                )
+            except Exception as e:
+                # Catch "Executable doesn't exist" specifically
+                if "Executable doesn't exist" in str(e):
+                    print(f"❌ Error: Playwright browser binary not found.", file=sys.stderr)
+                    print(f"   Environment: {sys.executable}", file=sys.stderr)
+                    print(f"   Action: Run 'playwright install chromium' in this environment manually.", file=sys.stderr)
+                    sys.exit(1)
+                raise e
+
+            context = browser.new_context(
+                user_agent=HARD_CODED_USER_AGENT,
+                locale="en-US",
+                extra_http_headers=DEFAULT_EXTRA_HEADERS,
+            )
+            # Reduce some common automation signals.
+            context.add_init_script(
+                """
+                // Hide webdriver
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                // Spoof languages
+                Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+                """
+            )
+            page = context.new_page()
+            
+            try:
+                # Many modern sites never reach "networkidle" due to long-polling/analytics.
+                # Use domcontentloaded for fast/robust completion, then optionally settle briefly.
+                page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+                try:
+                    page.wait_for_load_state("networkidle", timeout=3_000)
+                except Exception:
+                    pass
+                content = page.content()
+            except timeout_error_cls:
+                print(f"❌ Error: Timeout while loading {url}", file=sys.stderr)
+                sys.exit(1)
+            except Exception as e:
+                print(f"❌ Error: {e}", file=sys.stderr)
+                sys.exit(1)
+            finally:
+                context.close()
+                browser.close()
+
+            if output_path:
+                try:
+                    with open(output_path, 'w', encoding='utf-8') as f:
+                        f.write(content)
+                    print(f"✅ Saved to {output_path}", file=sys.stderr)
+                except Exception as e:
+                    print(f"❌ Error writing to file: {e}", file=sys.stderr)
+                    sys.exit(1)
+            else:
+                print(content)
+
+    except Exception as e:
+        if "Executable doesn't exist" in str(e):
+             print(f"❌ Error: Playwright browser binary not found.", file=sys.stderr)
+             print(f"   Environment: {sys.executable}", file=sys.stderr)
+             print(f"   Action: Run 'playwright install chromium' in this environment manually.", file=sys.stderr)
+             sys.exit(1)
+        print(f"❌ Unexpected Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+def main():
+    parser = argparse.ArgumentParser(description="Fetch rendered HTML using a headless browser (JS-enabled curl)")
+    parser.add_argument("url", help="The URL to fetch")
+    parser.add_argument("-o", "--output", help="Output file path (default: stdout)")
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=DEFAULT_TIMEOUT_MS / 1000.0,
+        help="Navigation timeout in seconds (default: 20)",
+    )
+    
+    args = parser.parse_args()
+    
+    fetch_html(args.url, args.output, timeout_ms=int(args.timeout * 1000))
+
+if __name__ == "__main__":
+    main()
+
