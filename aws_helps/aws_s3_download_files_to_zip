@@ -80,39 +80,40 @@ def download_files_to_zip(output_zip_name, profile_name, region, bucket_name, ob
                 # Retrieve the object from S3
                 print(f"Downloading {object_key} from {bucket_name} ({i}/{len(expanded_keys)})")
                 
-            # Stream the file directly to the ZIP without loading into memory
-            # Handle potential SSO token expiration with retry
-            max_retries = 3
-            retry_count = 0
-            while retry_count < max_retries:
-                try:
-                    s3_response = s3.get_object(Bucket=bucket_name, Key=object_key)
-                    break
-                except botocore.exceptions.ClientError as e:
-                    error_code = e.response.get('Error', {}).get('Code', '')
-                    error_msg = str(e)
-                    
-                    # Check for token expiration or authentication errors
-                    if error_code in ['ExpiredToken', 'InvalidToken', 'TokenRefreshRequired'] or \
-                       'expired' in error_msg.lower() or 'token' in error_msg.lower() or \
-                       'authentication' in error_msg.lower():
-                        if retry_count < max_retries - 1:
-                            print(f"\n  Warning: Authentication token may have expired. Attempting to refresh...")
-                            print(f"  If this persists, you may need to run: aws sso login --profile {profile_name}")
-                            # Recreate the session to trigger token refresh
-                            session = boto3.Session(profile_name=profile_name, region_name=region)
-                            s3 = session.client('s3')
-                            retry_count += 1
-                            continue
+                # Stream the file directly to the ZIP without loading into memory
+                # Handle potential SSO token expiration with retry
+                max_retries = 3
+                retry_count = 0
+                while retry_count < max_retries:
+                    try:
+                        s3_response = s3.get_object(Bucket=bucket_name, Key=object_key)
+                        break
+                    except botocore.exceptions.ClientError as e:
+                        error_code = e.response.get('Error', {}).get('Code', '')
+                        error_msg = str(e)
+                        
+                        # Check for token expiration or authentication errors
+                        if error_code in ['ExpiredToken', 'InvalidToken', 'TokenRefreshRequired'] or \
+                           'expired' in error_msg.lower() or 'token' in error_msg.lower() or \
+                           'authentication' in error_msg.lower():
+                            if retry_count < max_retries - 1:
+                                print(f"\n  Warning: Authentication token may have expired. Attempting to refresh...")
+                                print(f"  If this persists, you may need to run: aws sso login --profile {profile_name}")
+                                # Recreate the session to trigger token refresh
+                                session = boto3.Session(profile_name=profile_name, region_name=region)
+                                s3 = session.client('s3')
+                                retry_count += 1
+                                continue
+                            else:
+                                print(f"\n  Error: Authentication failed after {max_retries} attempts.")
+                                print(f"  Your SSO token may have expired during the long-running operation.")
+                                print(f"  Please refresh your token and try again:")
+                                print(f"    aws sso login --profile {profile_name}")
+                                raise
                         else:
-                            print(f"\n  Error: Authentication failed after {max_retries} attempts.")
-                            print(f"  Your SSO token may have expired during the long-running operation.")
-                            print(f"  Please refresh your token and try again:")
-                            print(f"    aws sso login --profile {profile_name}")
+                            # Not an auth error, re-raise
                             raise
-                    else:
-                        # Not an auth error, re-raise
-                        raise
+                
                 file_data = s3_response['Body'].read()
                 
                 # Write the file to the ZIP
