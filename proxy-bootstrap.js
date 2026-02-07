@@ -66,7 +66,7 @@ function main() {
     if (fs.existsSync(outDir)) {
       fs.rmSync(outDir, { recursive: true });
     }
-    execFileSync("tar", ["xzf", tarPath, "-C", "/tmp"]);
+    execFileSync("tar", ["--warning=no-unknown-keyword", "xzf", tarPath, "-C", "/tmp"]);
     fs.unlinkSync(tarPath);
     console.log("");
     console.log("Payload extracted to /tmp/home-proxy-payload");
