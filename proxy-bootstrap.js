@@ -11,6 +11,7 @@
  */
 const crypto = require("crypto");
 const fs = require("fs");
+const readline = require("readline");
 const { execFileSync } = require("child_process");
 
 const ALGORITHM = "aes-256-gcm";
@@ -69,10 +70,28 @@ function main() {
     fs.unlinkSync(tarPath);
     console.log("");
     console.log("Payload extracted to /tmp/home-proxy-payload");
-    console.log("");
-    console.log("Next: run the install script:");
-    console.log("  cd /tmp/home-proxy-payload && export HOME_PROXY_API_KEY=yourkey && sudo bash scripts/install.sh");
-    console.log("");
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    rl.question("Install the service now? (y/n) ", (answer) => {
+      rl.close();
+      const installDir = "/tmp/home-proxy-payload";
+      if (answer && (answer.toLowerCase() === "y" || answer.toLowerCase() === "yes")) {
+        try {
+          execFileSync("sudo", ["-E", "bash", "scripts/install.sh"], {
+            cwd: installDir,
+            stdio: "inherit",
+            env: process.env,
+          });
+        } catch (e) {
+          process.exit(e.status || 1);
+        }
+      } else {
+        console.log("");
+        console.log("To install manually:");
+        console.log("  cd /tmp/home-proxy-payload");
+        console.log("  export HOME_PROXY_API_KEY=your_key");
+        console.log("  sudo -E bash scripts/install.sh");
+      }
+    });
   } catch (err) {
     console.error("Error:", err.message);
     process.exit(1);
