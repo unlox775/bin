@@ -1,0 +1,214 @@
+#!/usr/bin/env python3
+
+import argparse
+import json
+import os
+import signal
+import subprocess
+import sys
+
+import botocore.exceptions
+import inquirer
+
+from lib.aws_common import AWSCommon
+
+
+aws_common = AWSCommon()
+
+
+def check_aws_access():
+    """Check if we have valid AWS credentials."""
+    return aws_common.check_aws_credentials()
+
+
+def get_instances(search_term):
+    """Get running EC2 instances matching the search term."""
+    ec2 = aws_common.get_boto3_client('ec2')
+    instances = ec2.describe_instances(
+        Filters=[
+            {'Name': 'instance-state-name', 'Values': ['running']}
+        ]
+    )['Reservations']
+
+    search_term_lower = search_term.lower()
+    result = []
+
+    for reservation in instances:
+        for instance in reservation['Instances']:
+            instance_tags = instance.get('Tags', [])
+            tags = {tag['Key']: tag['Value'] for tag in instance_tags}
+            instance_name = tags.get('Name', '')
+
+            searchable_values = [
+                instance['InstanceId'],
+                instance_name,
+                instance.get('InstanceType', ''),
+                instance.get('PrivateIpAddress', ''),
+                instance.get('PublicIpAddress', ''),
+            ]
+            searchable_values.extend(tags.keys())
+            searchable_values.extend(tags.values())
+
+            if any(search_term_lower in str(value).lower() for value in searchable_values if value):
+                result.append({
+                    'id': instance['InstanceId'],
+                    'name': instance_name or 'N/A',
+                    'type': instance.get('InstanceType', 'N/A'),
+                    'private_ip': instance.get('PrivateIpAddress', 'N/A'),
+                    'tags': tags,
+                })
+
+    return result
+
+
+def select_instance(instances, search_term):
+    """Select an EC2 instance from the filtered list."""
+    if not instances:
+        print("No running EC2 instances found matching the search term.")
+        sys.exit(1)
+
+    try:
+        max_name_length = os.get_terminal_size().columns - 5
+    except OSError:
+        max_name_length = 120
+
+    choices = []
+    for instance in instances:
+        matching_tags = {
+            key: value
+            for key, value in instance['tags'].items()
+            if search_term.lower() in key.lower() or search_term.lower() in value.lower()
+        }
+        sorted_matching_tags = dict(sorted(matching_tags.items()))
+        menu_option = (
+            f"{instance['id']} - {instance['name']} - {instance['private_ip']} "
+            f"- {instance['type']} - {sorted_matching_tags}"
+        )
+        choices.append(menu_option[:max_name_length])
+
+    questions = [
+        inquirer.List(
+            'selected_instance',
+            message="Which EC2 instance is running MySQL?",
+            choices=choices,
+        )
+    ]
+
+    try:
+        answers = inquirer.prompt(questions)
+        if answers is None:
+            print("\nSelection cancelled. Exiting.")
+            sys.exit(0)
+        selected_index = choices.index(answers['selected_instance'])
+        return instances[selected_index]
+    except KeyboardInterrupt:
+        print("\nOperation cancelled. Exiting.")
+        sys.exit(0)
+
+
+def warn_if_ssm_not_online(instance_id):
+    """Warn when the selected instance is not currently visible to SSM."""
+    ssm = aws_common.get_boto3_client('ssm')
+
+    try:
+        response = ssm.describe_instance_information(
+            Filters=[
+                {'Key': 'InstanceIds', 'Values': [instance_id]}
+            ]
+        )
+    except botocore.exceptions.ClientError as e:
+        print(f"Warning: Could not verify SSM status for {instance_id}: {str(e)}")
+        return
+
+    instance_info = response.get('InstanceInformationList', [])
+    if not instance_info:
+        print(f"Warning: {instance_id} is not currently listed by SSM.")
+        print("The port-forward session will fail unless the SSM agent is installed, online, and permitted.")
+        return
+
+    ping_status = instance_info[0].get('PingStatus')
+    if ping_status != 'Online':
+        print(f"Warning: SSM status for {instance_id} is {ping_status}.")
+
+
+def setup_mysql_port_forwarding(instance_id, local_port, mysql_port):
+    """Forward a local port directly to the MySQL port on the selected EC2 instance."""
+    parameters = {
+        "portNumber": [str(mysql_port)],
+        "localPortNumber": [str(local_port)],
+    }
+
+    print("\nSetting up EC2-local MySQL port forwarding through SSM:")
+    print(f"  Instance ID:     {instance_id}")
+    print(f"  Local port:      {local_port}")
+    print(f"  EC2 MySQL port:  {mysql_port}")
+    print("\nConnect using:")
+    print(f"  mysql -h 127.0.0.1 -P {local_port} -u <username> -p<password> <database>")
+    print("\nPort forwarding active. Press Ctrl+C to quit.\n")
+
+    cmd = [
+        "aws", "ssm", "start-session",
+        "--target", instance_id,
+        "--document-name", "AWS-StartPortForwardingSession",
+        "--parameters", json.dumps(parameters),
+    ]
+
+    def signal_handler(sig, frame):
+        print("\nPort forwarding stopped.")
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, signal_handler)
+
+    print(f"Starting session with command: {' '.join(cmd)}")
+    subprocess.run(cmd, check=True)
+
+
+def validate_port(port, label):
+    if port < 1 or port > 65535:
+        print(f"ERROR: {label} must be between 1 and 65535")
+        sys.exit(1)
+    if label == "Local port" and port < 1024:
+        print("ERROR: Local port must be between 1024 and 65535")
+        sys.exit(1)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description='''EC2-local MySQL port forwarding tool using AWS Systems Manager.
+
+This tool establishes secure port forwarding directly to a MySQL server running on an
+EC2 instance through AWS Systems Manager (SSM), allowing local database connections
+without SSH keys, VPN, public MySQL access, or a separate jump host.
+
+Key use cases:
+- Database access: Connect to MySQL running locally on an EC2 instance
+- Secure tunneling: Use SSM instead of exposing MySQL or opening SSH
+- Development: Local database connections for application development
+- Troubleshooting: Direct database access for debugging and maintenance
+- Multi-account access: Work across AWS accounts and regions using AWS profiles
+
+The tool searches running EC2 instances by ID, name, IP address, instance type, or tags,
+then starts an AWS-StartPortForwardingSession to the selected instance's MySQL port.''',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument('search_term', help='Search term to match EC2 instance ID, name, IP address, type, or tags')
+    parser.add_argument('local_port', help='Local port for forwarding (default: 13306)', nargs='?', type=int, default=13306)
+    parser.add_argument('--mysql-port', help='MySQL port on the EC2 instance (default: 3306)', type=int, default=3306)
+    args = parser.parse_args()
+
+    validate_port(args.local_port, "Local port")
+    validate_port(args.mysql_port, "MySQL port")
+
+    check_aws_access()
+
+    print(f"Searching for running EC2 instances matching: {args.search_term}")
+    instances = get_instances(args.search_term)
+    selected_instance = select_instance(instances, args.search_term)
+    instance_id = selected_instance['id']
+
+    warn_if_ssm_not_online(instance_id)
+    setup_mysql_port_forwarding(instance_id, args.local_port, args.mysql_port)
+
+
+if __name__ == "__main__":
+    main()

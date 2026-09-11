@@ -49,6 +49,8 @@ This directory contains various AWS command-line helper scripts organized by ser
     - Usage: `echo "SELECT ..." | aws_athena_run_query <aws_profile> <region> <database>`
 - `aws_rds_mysql_ssm_port_forward`: Set up SSM port forwarding to RDS MySQL instances.
     - Usage: `aws_rds_mysql_ssm_port_forward <search_term>`
+- `aws_ec2_mysql_ssm_port_forward`: Set up SSM port forwarding to MySQL running locally on an EC2 instance.
+    - Usage: `aws_ec2_mysql_ssm_port_forward <search_term> [local_port] [--mysql-port 3306]`
 - `aws_redshift_inspect_user`: Inspect usage and ownership details for a given Redshift user, including role memberships, active sessions, stored procs, and more.
     - Usage: `aws_redshift_inspect_user --conn redshift://admin@my-cluster.us-east-1.redshift.amazonaws.com:5439 --target-user old_employee --json-output detailed-report.json`
 - `aws_redshift_ssm_port_forward`: Set up SSM port forwarding to Redshift clusters.
